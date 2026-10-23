@@ -165,9 +165,11 @@ private fun CalorieLensApp() {
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                navigationIcon = if (pendingItems != null || showProfile || showHistory || showApiKey) {
-                    { IconButton(onClick = goHome) { Icon(Icons.Default.ArrowBack, "返回") } }
-                } else null,
+                navigationIcon = {
+                    if (pendingItems != null || showProfile || showHistory || showApiKey) {
+                        IconButton(onClick = goHome) { Icon(Icons.Default.ArrowBack, "返回") }
+                    }
+                },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
