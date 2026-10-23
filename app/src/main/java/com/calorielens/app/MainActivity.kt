@@ -32,6 +32,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,7 +41,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.calorielens.app.data.PersistentMealStore
 import com.calorielens.app.domain.FoodItem
 import com.calorielens.app.domain.Meal
@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
 private fun CalorieLensApp() {
     val context = LocalContext.current
     val store = remember { PersistentMealStore(context) }
-    val meals by store.meals.collectAsStateWithLifecycle()
+    val meals by store.meals.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     var recognizing by remember { mutableStateOf(false) }
     var showProfile by remember { mutableStateOf(false) }
