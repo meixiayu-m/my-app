@@ -31,7 +31,7 @@ backend/.env.example                后端密钥配置模板
 
 ## 个人模式：直接在 App 填 Key（当前推荐给你）
 
-GitHub Actions 编译 APK 后，打开 App，点击右上角设置图标，在“智谱识别设置”中填写 API Key，点击“保存 Key”。Key 只保存在这台手机的 Android Keystore 加密存储中，源码、GitHub 和 APK 都不会包含你的真实 Key。
+GitHub Actions 编译 APK 后，打开 App，点击右上角设置图标，在“智谱识别设置”中填写 API Key 和模型名称，点击“保存设置”。Key 只保存在这台手机的 Android Keystore 加密存储中，源码、GitHub 和 APK 都不会包含你的真实 Key。模型名称默认是 `glm-4.6v-flash`，可以改成智谱控制台显示且账号有权限的其他视觉模型接口 ID。
 
 个人模式不需要启动 `backend/`，手机需要能访问智谱接口。删除 App 或点击“清除本机 Key”后，保存的 Key 会失效。这个方案适合个人自用；如果把 APK 分享给别人，运行中的 Key 仍可能被提取。
 

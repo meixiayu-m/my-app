@@ -12,9 +12,11 @@ import javax.crypto.spec.GCMParameterSpec
 
 /** 个人模式下把智谱 Key 加密存到 Android Keystore，不写入 APK 或普通明文配置。 */
 object ApiKeyStore {
+    const val DEFAULT_ZHIPU_MODEL = "glm-4.6v-flash"
     private const val KEY_ALIAS = "calorie_lens_zhipu_key"
     private const val PREFS = "private_settings"
     private const val VALUE = "zhipu_api_key"
+    private const val MODEL_VALUE = "zhipu_model"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
 
     fun read(context: Context): String? = runCatching {
@@ -39,7 +41,21 @@ object ApiKeyStore {
     }
 
     fun clear(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(VALUE).apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove(VALUE)
+            .remove(MODEL_VALUE)
+            .apply()
+    }
+
+    fun readModel(context: Context): String? = context
+        .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getString(MODEL_VALUE, null)
+
+    fun saveModel(context: Context, model: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(MODEL_VALUE, model.trim())
+            .apply()
     }
 
     private fun secretKey(): SecretKey {

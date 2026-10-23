@@ -28,6 +28,9 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
     override suspend fun recognize(context: Context, imageUri: Uri): List<FoodItem> = withContext(Dispatchers.IO) {
         val apiKey = ApiKeyStore.read(context)?.trim().orEmpty()
         require(apiKey.isNotEmpty()) { "请先在设置中填写智谱 API Key" }
+        val model = ApiKeyStore.readModel(context)?.trim()
+            .orEmpty()
+            .ifBlank { DEFAULT_MODEL }
         val resolver = context.contentResolver
         val mimeType = resolver.getType(imageUri)?.takeIf { it.startsWith("image/") } ?: "image/jpeg"
         val bytes = resolver.openInputStream(imageUri)?.use { it.readBytes() }
@@ -37,7 +40,7 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
 
         val imageData = "data:$mimeType;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}"
         val payload = JSONObject()
-            .put("model", MODEL)
+            .put("model", model)
             .put("temperature", 0.1)
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", PROMPT))
@@ -58,7 +61,16 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
             .build()
         HTTP_CLIENT.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) error("智谱接口错误（${response.code}）")
+            if (!response.isSuccessful) {
+                val detail = runCatching {
+                    val json = JSONObject(body)
+                    json.optString("message")
+                        .ifBlank { json.optJSONObject("error")?.optString("message").orEmpty() }
+                        .ifBlank { json.optString("msg") }
+                }.getOrDefault("")
+                val suffix = detail.take(180).takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()
+                error("智谱接口错误（${response.code}）$suffix")
+            }
             parseResponse(body)
         }
     }
@@ -116,7 +128,7 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
 
     private companion object {
         const val API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-        const val MODEL = "glm-4.6v-flash"
+        const val DEFAULT_MODEL = "glm-4.6v-flash"
         const val MAX_IMAGE_BYTES = 12 * 1024 * 1024
         const val PROMPT = """
 你是一个严谨的食物营养估算助手。识别图片中能看见的食物，按独立食物项返回。

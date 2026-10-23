@@ -240,7 +240,12 @@ private fun CalorieLensApp() {
             showHistory -> HistoryScreen(meals, target, Modifier.padding(padding))
             showApiKey -> ApiKeyEditor(
                 currentKey = ApiKeyStore.read(context).orEmpty(),
-                onSave = { ApiKeyStore.save(context, it); showApiKey = false },
+                currentModel = ApiKeyStore.readModel(context) ?: ApiKeyStore.DEFAULT_ZHIPU_MODEL,
+                onSave = { key, model ->
+                    ApiKeyStore.save(context, key)
+                    ApiKeyStore.saveModel(context, model)
+                    showApiKey = false
+                },
                 onClear = { ApiKeyStore.clear(context); showApiKey = false },
                 modifier = Modifier.padding(padding)
             )
@@ -463,11 +468,13 @@ private fun MealCard(meal: Meal, target: com.calorielens.app.domain.DailyTarget,
 @Composable
 private fun ApiKeyEditor(
     currentKey: String,
-    onSave: (String) -> Unit,
+    currentModel: String,
+    onSave: (String, String) -> Unit,
     onClear: () -> Unit,
     modifier: Modifier
 ) {
     var key by remember(currentKey) { mutableStateOf(currentKey) }
+    var model by remember(currentModel) { mutableStateOf(currentModel) }
     Column(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -482,7 +489,15 @@ private fun ApiKeyEditor(
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth()
         )
-        Button(onClick = { onSave(key) }, enabled = key.isNotBlank()) { Text("保存 Key") }
+        androidx.compose.material3.OutlinedTextField(
+            value = model,
+            onValueChange = { model = it },
+            label = { Text("模型名称（接口 ID）") },
+            supportingText = { Text("默认：glm-4.6v-flash；也可填写你账号有权限的其他视觉模型") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(onClick = { onSave(key, model) }, enabled = key.isNotBlank() && model.isNotBlank()) { Text("保存设置") }
         OutlinedButton(onClick = onClear, enabled = currentKey.isNotBlank()) { Text("清除本机 Key") }
         Text("提示：个人使用可以这样配置，但如果 APK 分享给别人，Key 仍可能被提取。公开版本应改回后端代理模式。", style = MaterialTheme.typography.bodySmall)
     }
