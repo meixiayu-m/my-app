@@ -38,6 +38,7 @@ import kotlin.coroutines.resumeWithException
 
 interface FoodRecognizer {
     suspend fun recognize(context: Context, imageUri: Uri): List<FoodItem>
+    suspend fun refine(context: Context, imageUri: Uri, currentItems: List<FoodItem>, userCorrection: String): List<FoodItem>
 }
 
 /**
@@ -45,7 +46,49 @@ interface FoodRecognizer {
  * Key 从 Android Keystore 加密存储读取，不会写进源码、Gradle 或 APK 常量。
  */
 class DirectZhipuFoodRecognizer : FoodRecognizer {
-    override suspend fun recognize(context: Context, imageUri: Uri): List<FoodItem> = withContext(Dispatchers.IO) {
+    override suspend fun recognize(context: Context, imageUri: Uri): List<FoodItem> = request(
+        context = context,
+        imageUri = imageUri,
+        systemPrompt = PROMPT,
+        userText = "请识别这张餐食图片并严格按要求返回 JSON。"
+    )
+
+    override suspend fun refine(
+        context: Context,
+        imageUri: Uri,
+        currentItems: List<FoodItem>,
+        userCorrection: String
+    ): List<FoodItem> {
+        val currentJson = JSONArray().apply {
+            currentItems.forEach { item ->
+                put(JSONObject()
+                    .put("name", item.name)
+                    .put("grams", item.grams)
+                    .put("calories", item.nutrition().calories)
+                    .put("protein", item.nutrition().protein)
+                    .put("fat", item.nutrition().fat)
+                    .put("carbs", item.nutrition().carbs)
+                    .put("fiber", item.nutrition().fiber))
+            }
+        }
+        return request(
+            context = context,
+            imageUri = imageUri,
+            systemPrompt = CORRECTION_PROMPT,
+            userText = """
+用户补充/纠正：${userCorrection.trim()}
+当前识别列表：$currentJson
+请结合原图和用户补充，修正不准确的食物；确认正确的项目请保留。只返回完整 JSON。
+""".trimIndent()
+        )
+    }
+
+    private suspend fun request(
+        context: Context,
+        imageUri: Uri,
+        systemPrompt: String,
+        userText: String
+    ): List<FoodItem> = withContext(Dispatchers.IO) {
         val apiKey = ApiKeyStore.read(context)?.trim().orEmpty()
         require(apiKey.isNotEmpty()) { "请先在设置中填写智谱 API Key" }
         val model = ApiKeyStore.readModel(context)?.trim()
@@ -59,11 +102,11 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
             .put("model", model)
             .put("temperature", 0.1)
             .put("messages", JSONArray()
-                .put(JSONObject().put("role", "system").put("content", PROMPT))
+                .put(JSONObject().put("role", "system").put("content", systemPrompt))
                 .put(JSONObject()
                     .put("role", "user")
                     .put("content", JSONArray()
-                        .put(JSONObject().put("type", "text").put("text", "请识别这张餐食图片并严格按要求返回 JSON。"))
+                        .put(JSONObject().put("type", "text").put("text", userText))
                         .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", imageData)))
                     )
                 )
@@ -273,6 +316,16 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
 只能返回 JSON，不要 Markdown，不要解释文字，格式必须是：
 {"items":[{"name":"食物名称","grams":150,"calories":174,"protein":3.9,"fat":0.5,"carbs":38.9,"fiber":0.5,"confidence":0.86}]}
 看不清时可以返回空 items，不要编造固定的菜名；所有数值都必须是非负数字，confidence 在 0 到 1 之间。
+"""
+        const val CORRECTION_PROMPT = """
+你是一个严谨的食物营养估算助手。用户正在纠正之前的图片识别结果。
+你会收到原始图片、当前食物列表和用户的文字补充。用户可能只纠正某一道菜，也可能补充漏掉的食物。
+以用户明确说明的食物种类为优先，并结合原图估算份量；未被纠正且仍合理的项目要保留，不要随意删除或全部重做。
+如果用户修改了名称，要重新估算该食物的热量及营养密度；不要把旧食物的营养值照搬到新名称上。
+返回完整的食物列表，每项为本份可食重量（克）与本份的具体营养值，不是每 100g 的值。
+只能返回 JSON，不要 Markdown 或解释。格式：
+{"items":[{"name":"食物名称","grams":150,"calories":174,"protein":3.9,"fat":0.5,"carbs":38.9,"fiber":0.5,"confidence":0.86}]}
+所有数值必须是非负数字，confidence 在 0 到 1 之间。
 """
         val HTTP_CLIENT: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(RecognitionNetworkPolicy.CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)

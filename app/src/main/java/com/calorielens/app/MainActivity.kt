@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -233,6 +234,9 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     var showManualMeal by remember { mutableStateOf(false) }
     var ratingTarget by remember { mutableStateOf<Meal?>(null) }
     var pendingItems by remember { mutableStateOf<List<FoodItem>?>(null) }
+    var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
+    var refining by remember { mutableStateOf(false) }
+    var refinementError by remember { mutableStateOf<String?>(null) }
     var profile by remember { mutableStateOf(ProfileStore.read(context)) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var fabExpanded by remember { mutableStateOf(false) }
@@ -246,6 +250,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
             scope.launch {
                 try {
                     pendingItems = recognizer.recognize(context, uri)
+                    pendingImageUri = uri
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -278,6 +283,8 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
 
     val goHome = {
         pendingItems = null
+        pendingImageUri = null
+        refinementError = null
         showProfile = false
         showHistory = false
         showApiKey = false
@@ -361,11 +368,32 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
         when {
             pendingItems != null -> MealEditor(
                 initialItems = pendingItems!!,
-                onCancel = { pendingItems = null },
+                refinementError = refinementError,
+                refining = refining,
+                onCancel = { pendingItems = null; pendingImageUri = null },
+                onRefine = { items, note ->
+                    val imageUri = pendingImageUri
+                    if (imageUri != null && !refining && note.isNotBlank()) {
+                        refinementError = null
+                        refining = true
+                        scope.launch {
+                            try {
+                                pendingItems = recognizer.refine(context, imageUri, items, note)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                refinementError = error.message ?: "AI 修正失败，请稍后重试"
+                            } finally {
+                                refining = false
+                            }
+                        }
+                    }
+                },
                 onSave = { items, title ->
                     scope.launch {
                         ratingTarget = store.addMealAndReturn(items, title = title)
                         pendingItems = null
+                        pendingImageUri = null
                     }
                 },
                 modifier = Modifier.padding(padding)
@@ -428,13 +456,18 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
 @Composable
 private fun MealEditor(
     initialItems: List<FoodItem>,
+    refinementError: String?,
+    refining: Boolean,
     onCancel: () -> Unit,
+    onRefine: (List<FoodItem>, String) -> Unit,
     onSave: (List<FoodItem>, String) -> Unit,
     modifier: Modifier
 ) {
     var items by remember(initialItems) { mutableStateOf(initialItems) }
     var title by remember { mutableStateOf(defaultMealTitle()) }
     var mealMenuOpen by remember { mutableStateOf(false) }
+    var correctionEnabled by remember(initialItems) { mutableStateOf(false) }
+    var correctionText by remember(initialItems) { mutableStateOf("") }
     Column(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -456,6 +489,25 @@ private fun MealEditor(
                 }
             }
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = correctionEnabled, onCheckedChange = { correctionEnabled = it })
+            Text("识别不准？用文字告诉 AI 纠正，并结合原图重新计算")
+        }
+        if (correctionEnabled) {
+            androidx.compose.material3.OutlinedTextField(
+                value = correctionText,
+                onValueChange = { correctionText = it },
+                label = { Text("例如：蒸鸡蛋糕，不是冻豆腐；另外还有半个苹果") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Button(
+                onClick = { onRefine(items, correctionText) },
+                enabled = correctionText.isNotBlank() && !refining,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (refining) "AI 正在结合图片修正…" else "用 AI 修正识别结果") }
+            refinementError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        }
         items.forEachIndexed { index, item ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -465,6 +517,15 @@ private fun MealEditor(
                 Column(Modifier.padding(14.dp)) {
                     Text("${item.name} · 本份约 ${item.nutrition().calories} kcal", fontWeight = FontWeight.SemiBold)
                     Text("参考密度：${item.caloriesPer100g.toInt()} kcal / 100g · 识别份量：${item.grams.toInt()}g", style = MaterialTheme.typography.bodySmall)
+                    androidx.compose.material3.OutlinedTextField(
+                        value = item.name,
+                        onValueChange = { value ->
+                            items = items.toMutableList().also { it[index] = item.copy(name = value) }
+                        },
+                        label = { Text("食物种类（可直接修改）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     androidx.compose.material3.OutlinedTextField(
                         value = item.grams.toInt().toString(),
                         onValueChange = { value ->
