@@ -58,8 +58,6 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
         val payload = JSONObject()
             .put("model", model)
             .put("temperature", 0.1)
-            // 限制回答长度，避免模型输出解释文字拖慢整次请求；解析仍以 JSON 为准。
-            .put("max_tokens", 500)
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", PROMPT))
                 .put(JSONObject()
@@ -201,10 +199,12 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
 
     private fun parseResponse(body: String): List<FoodItem> {
         val response = JSONObject(body)
-        val content = response.getJSONArray("choices")
-            .getJSONObject(0)
-            .getJSONObject("message")
-            .get("content")
+        val choices = response.optJSONArray("choices")
+            ?: error("智谱返回缺少 choices，可能是模型或接口版本不匹配")
+        if (choices.length() == 0) error("智谱返回空 choices，没有生成识别结果")
+        val message = choices.optJSONObject(0)?.optJSONObject("message")
+            ?: error("智谱返回缺少 message")
+        val content = message.opt("content")
         val text = when (content) {
             is String -> content
             is JSONArray -> buildString {
@@ -212,7 +212,13 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
                     append(content.optJSONObject(index)?.optString("text").orEmpty())
                 }
             }
+            null, JSONObject.NULL -> ""
             else -> content.toString()
+        }
+        if (text.isBlank()) {
+            val finishReason = choices.optJSONObject(0)?.optString("finish_reason").orEmpty()
+            val suffix = finishReason.takeIf { it.isNotBlank() }?.let { "（finish_reason=$it）" }.orEmpty()
+            error("智谱返回了空内容$suffix；请确认模型支持图片识别，或稍后重试")
         }
         val cleaned = text.trim()
             .removePrefix("```json")
@@ -220,7 +226,11 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
             .removePrefix("```")
             .removeSuffix("```")
             .trim()
-        val items = JSONObject(cleaned).optJSONArray("items") ?: JSONArray()
+        val jsonStart = cleaned.indexOf('{')
+        val jsonEnd = cleaned.lastIndexOf('}')
+        val jsonText = if (jsonStart >= 0 && jsonEnd > jsonStart) cleaned.substring(jsonStart, jsonEnd + 1) else cleaned
+        val items = runCatching { JSONObject(jsonText).optJSONArray("items") ?: JSONArray() }
+            .getOrElse { error("智谱返回内容不是有效 JSON，请重试或更换支持图片的模型") }
         return buildList {
             for (index in 0 until items.length()) {
                 val item = items.optJSONObject(index) ?: continue

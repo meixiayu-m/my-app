@@ -19,8 +19,8 @@ android {
         minSdk = 26
         targetSdk = 35
         // 每次可安装的新 APK 递增，避免手机把相同版本当成旧安装包并继续使用桌面图标缓存。
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
 
     buildFeatures { compose = true }

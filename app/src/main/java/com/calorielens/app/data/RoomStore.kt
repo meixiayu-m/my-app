@@ -95,11 +95,15 @@ class PersistentMealStore(context: Context) {
     } }
 
     fun addMeal(items: List<FoodItem>, title: String = "午餐", rating: Int = 0, imagePath: String? = null) {
+        scope.launch { addMealAndReturn(items, title, rating, imagePath) }
+    }
+
+    suspend fun addMealAndReturn(items: List<FoodItem>, title: String = "午餐", rating: Int = 0, imagePath: String? = null): Meal {
         val mealId = UUID.randomUUID().toString()
-        scope.launch {
-            dao.insertMeal(MealEntity(mealId, System.currentTimeMillis(), title, imagePath, rating.coerceIn(0, 5)))
-            dao.insertItems(items.map { it.toEntity(mealId) })
-        }
+        val timestamp = System.currentTimeMillis()
+        dao.insertMeal(MealEntity(mealId, timestamp, title, imagePath, rating.coerceIn(0, 5)))
+        dao.insertItems(items.map { it.toEntity(mealId) })
+        return Meal(mealId, timestamp, title, items, imagePath, rating.coerceIn(0, 5))
     }
 
     fun deleteMeal(id: String) { scope.launch { dao.deleteItems(id); dao.deleteMeal(id) } }

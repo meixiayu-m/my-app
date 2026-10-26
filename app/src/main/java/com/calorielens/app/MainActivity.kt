@@ -1,6 +1,7 @@
 package com.calorielens.app
 
 import android.Manifest
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -53,24 +55,33 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.calorielens.app.data.ApiKeyStore
 import com.calorielens.app.data.AppAppearance
 import com.calorielens.app.data.AppTheme
@@ -91,6 +102,8 @@ import com.calorielens.app.recognition.ZhipuModelCatalog
 import com.calorielens.app.recognition.ZhipuModelInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -140,7 +153,24 @@ private fun CalorieLensTheme(appearance: AppAppearance, content: @Composable () 
             surfaceVariant = Color(0xFFF2F4EC)
         )
     }
-    MaterialTheme(colorScheme = base, content = content)
+    val scheme = if (appearance.glass) base.copy(
+        surface = base.surface.copy(alpha = if (dark) 0.84f else 0.76f),
+        surfaceVariant = base.surfaceVariant.copy(alpha = if (dark) 0.78f else 0.70f)
+    ) else base
+    val view = LocalView.current
+    val activity = view.context as? android.app.Activity
+    SideEffect {
+        activity?.window?.let { window ->
+            WindowCompat.setDecorFitsSystemWindows(window, true)
+            window.statusBarColor = scheme.background.toArgb()
+            window.navigationBarColor = scheme.background.toArgb()
+            WindowInsetsControllerCompat(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -149,12 +179,39 @@ private fun CalorieLensApp() {
     val context = LocalContext.current
     var appearance by remember { mutableStateOf(AppearanceStore.read(context)) }
     CalorieLensTheme(appearance) {
-        CalorieLensContent(
-            appearance = appearance,
-            onAppearanceChanged = {
-                AppearanceStore.save(context, it)
-                appearance = it
-            }
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            CustomWallpaper(appearance.customWallpaperUri)
+            CalorieLensContent(
+                appearance = appearance,
+                onAppearanceChanged = {
+                    AppearanceStore.save(context, it)
+                    appearance = it
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun CustomWallpaper(uri: String?) {
+    if (uri.isNullOrBlank()) return
+    val context = LocalContext.current
+    val image by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, uri) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                context.contentResolver.openInputStream(Uri.parse(uri))?.use { stream ->
+                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                }
+            }.getOrNull()
+        }
+    }
+    image?.let {
+        androidx.compose.foundation.Image(
+            bitmap = it,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+            alpha = 0.22f
         )
     }
 }
@@ -174,6 +231,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     var showApiKey by remember { mutableStateOf(false) }
     var showAppearance by remember { mutableStateOf(false) }
     var showManualMeal by remember { mutableStateOf(false) }
+    var ratingTarget by remember { mutableStateOf<Meal?>(null) }
     var pendingItems by remember { mutableStateOf<List<FoodItem>?>(null) }
     var profile by remember { mutableStateOf(ProfileStore.read(context)) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
@@ -227,7 +285,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
         showManualMeal = false
     }
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = if (appearance.customWallpaperUri != null || appearance.glass) Color.Transparent else MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 navigationIcon = {
@@ -263,7 +321,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         },
         floatingActionButton = {
@@ -304,12 +362,22 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
             pendingItems != null -> MealEditor(
                 initialItems = pendingItems!!,
                 onCancel = { pendingItems = null },
-                onSave = { items, title, rating -> store.addMeal(items, title = title, rating = rating); pendingItems = null },
+                onSave = { items, title ->
+                    scope.launch {
+                        ratingTarget = store.addMealAndReturn(items, title = title)
+                        pendingItems = null
+                    }
+                },
                 modifier = Modifier.padding(padding)
             )
             showManualMeal -> ManualMealEditor(
                 onCancel = { showManualMeal = false },
-                onSave = { items, title, rating -> store.addMeal(items, title = title, rating = rating); showManualMeal = false },
+                onSave = { items, title ->
+                    scope.launch {
+                        ratingTarget = store.addMealAndReturn(items, title = title)
+                        showManualMeal = false
+                    }
+                },
                 modifier = Modifier.padding(padding)
             )
             showProfile -> ProfileEditor(profile, onSave = {
@@ -348,18 +416,24 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
             )
         }
     }
+    ratingTarget?.let { meal ->
+        RatingDialog(
+            meal = meal,
+            onRate = { rating -> store.updateMeal(meal, meal.items, meal.title, rating); ratingTarget = null },
+            onSkip = { ratingTarget = null }
+        )
+    }
 }
 
 @Composable
 private fun MealEditor(
     initialItems: List<FoodItem>,
     onCancel: () -> Unit,
-    onSave: (List<FoodItem>, String, Int) -> Unit,
+    onSave: (List<FoodItem>, String) -> Unit,
     modifier: Modifier
 ) {
     var items by remember(initialItems) { mutableStateOf(initialItems) }
     var title by remember { mutableStateOf(defaultMealTitle()) }
-    var rating by remember { mutableStateOf(0) }
     var mealMenuOpen by remember { mutableStateOf(false) }
     Column(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
@@ -382,7 +456,6 @@ private fun MealEditor(
                 }
             }
         }
-        MealRatingBar(rating = rating, onRatingChanged = { rating = it })
         items.forEachIndexed { index, item ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -407,7 +480,7 @@ private fun MealEditor(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = onCancel) { Text("取消") }
-            Button(onClick = { onSave(items, title, rating) }) {
+            Button(onClick = { onSave(items, title) }) {
                 Icon(Icons.Default.Restaurant, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(6.dp))
                 Text("保存餐食")
@@ -437,6 +510,25 @@ private fun MealRatingBar(rating: Int, onRatingChanged: (Int) -> Unit) {
     }
 }
 
+@Composable
+private fun RatingDialog(meal: Meal, onRate: (Int) -> Unit, onSkip: () -> Unit) {
+    var rating by remember(meal.id) { mutableStateOf(0) }
+    AlertDialog(
+        onDismissRequest = onSkip,
+        title = { Text("这顿饭好吃吗？") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${meal.title} 已保存，可以给这顿饭一个口味评分。")
+                MealRatingBar(rating = rating, onRatingChanged = { rating = it })
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (rating > 0) onRate(rating) else onSkip() }) { Text(if (rating > 0) "保存评分" else "跳过") }
+        },
+        dismissButton = { TextButton(onClick = onSkip) { Text("稍后再评") } }
+    )
+}
+
 private fun ratingLabel(rating: Int): String = when (rating) {
     1 -> "不太合口味"
     2 -> "一般"
@@ -457,7 +549,7 @@ private fun defaultMealTitle(time: LocalTime = LocalTime.now()): String = when {
 @Composable
 private fun ManualMealEditor(
     onCancel: () -> Unit,
-    onSave: (List<FoodItem>, String, Int) -> Unit,
+    onSave: (List<FoodItem>, String) -> Unit,
     modifier: Modifier
 ) {
     var name by remember { mutableStateOf("") }
@@ -467,7 +559,6 @@ private fun ManualMealEditor(
     var fat by remember { mutableStateOf("0") }
     var carbs by remember { mutableStateOf("0") }
     var title by remember { mutableStateOf("下午茶") }
-    var rating by remember { mutableStateOf(0) }
     var menuOpen by remember { mutableStateOf(false) }
     val valid = name.isNotBlank() && (grams.toDoubleOrNull() ?: 0.0) > 0 && (calories.toDoubleOrNull() ?: -1.0) >= 0
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -487,7 +578,6 @@ private fun ManualMealEditor(
             androidx.compose.material3.OutlinedTextField(fat, { fat = it }, label = { Text("脂肪 g") }, modifier = Modifier.weight(1f))
             androidx.compose.material3.OutlinedTextField(carbs, { carbs = it }, label = { Text("碳水 g") }, modifier = Modifier.weight(1f))
         }
-        MealRatingBar(rating, { rating = it })
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onCancel) { Text("取消") }
             Button(onClick = {
@@ -496,7 +586,7 @@ private fun ManualMealEditor(
                     caloriesPer100g = calories.toDouble(), proteinPer100g = protein.toDoubleOrNull() ?: 0.0,
                     fatPer100g = fat.toDoubleOrNull() ?: 0.0, carbsPer100g = carbs.toDoubleOrNull() ?: 0.0,
                     fiberPer100g = 0.0, confidence = 1f
-                )), title, rating)
+                )), title)
             }, enabled = valid) { Text("保存手动记录") }
         }
     }
@@ -529,7 +619,7 @@ private fun HomeScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.extraLarge,
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF3EA))
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(Modifier.padding(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -540,7 +630,7 @@ private fun HomeScreen(
                         Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(14.dp))
-                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary, trackColor = Color.White)
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surface)
                     Spacer(Modifier.height(12.dp))
                     Text("已摄入 $consumed kcal / 目标 ${target.targetCalories} kcal")
                     Text("还可摄入 ${(target.targetCalories - consumed).coerceAtLeast(0)} kcal", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
@@ -555,7 +645,7 @@ private fun HomeScreen(
             if (recognizing) Text("正在上传图片并分析…", Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.secondary)
             if (errorMessage != null) {
                 val message = errorMessage
-                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFE8E0)), modifier = Modifier.fillMaxWidth()) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                         Text("关闭", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp))
@@ -581,7 +671,7 @@ private fun HomeScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.large,
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF1E9))
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(Modifier.padding(18.dp)) {
                     Text("还没有记录", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -618,7 +708,7 @@ private fun HistoryScreen(meals: List<Meal>, target: com.calorielens.app.domain.
             Text("按日期查看每一天的摄入和餐食记录。", style = MaterialTheme.typography.bodySmall)
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF3EA)), modifier = Modifier.fillMaxWidth()) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("今天概览", fontWeight = FontWeight.Bold)
                     Text("${todayNutrition.calories} / ${target.targetCalories} kcal · ${todayMeals.size} 餐")
@@ -771,10 +861,21 @@ private fun ApiKeyEditor(
 
 @Composable
 private fun AppearanceEditor(current: AppAppearance, onSave: (AppAppearance) -> Unit, modifier: Modifier) {
+    val context = LocalContext.current
     var theme by remember(current) { mutableStateOf(current.theme) }
     var wallpaper by remember(current) { mutableStateOf(current.wallpaper) }
+    var glass by remember(current) { mutableStateOf(current.glass) }
+    var customWallpaperUri by remember(current) { mutableStateOf(current.customWallpaperUri) }
     var themeMenuOpen by remember { mutableStateOf(false) }
     var wallpaperMenuOpen by remember { mutableStateOf(false) }
+    val wallpaperPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            customWallpaperUri = uri.toString()
+        }
+    }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("主题与壁纸", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text("识别结果页、首页卡片和按钮会跟随主题颜色变化；壁纸选项使用轻量纯色背景，不会增加图片体积。", style = MaterialTheme.typography.bodySmall)
@@ -785,6 +886,19 @@ private fun AppearanceEditor(current: AppAppearance, onSave: (AppAppearance) -> 
                     DropdownMenuItem(text = { Text(option.label) }, onClick = { theme = option; themeMenuOpen = false })
                 }
             }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text("玻璃卡片效果", fontWeight = FontWeight.SemiBold)
+                Text("让卡片和模块半透明，适合搭配自定义壁纸", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = glass, onCheckedChange = { glass = it })
+        }
+        OutlinedButton(onClick = { wallpaperPicker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (customWallpaperUri == null) "从相册选择自定义壁纸" else "更换自定义壁纸")
+        }
+        if (customWallpaperUri != null) {
+            TextButton(onClick = { customWallpaperUri = null }) { Text("恢复纯色壁纸") }
         }
         Box {
             OutlinedButton(onClick = { wallpaperMenuOpen = true }, modifier = Modifier.fillMaxWidth()) { Text("壁纸：${wallpaper.label}") }
@@ -800,7 +914,7 @@ private fun AppearanceEditor(current: AppAppearance, onSave: (AppAppearance) -> 
                 Text("识别成功后会先进入确认页，你可以改餐次、星级和份量，再保存。")
             }
         }
-        Button(onClick = { onSave(AppAppearance(theme, wallpaper)) }) { Text("应用外观") }
+        Button(onClick = { onSave(AppAppearance(theme, wallpaper, glass, customWallpaperUri)) }) { Text("应用外观") }
     }
 }
 
@@ -843,7 +957,7 @@ private fun ProfileEditor(current: UserProfile, onSave: (UserProfile) -> Unit, m
                 ActivityLevel.values().forEach { option -> DropdownMenuItem(text = { Text(option.label) }, onClick = { activity = option; activityMenuOpen = false }) }
             }
         }
-        Card(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF3EA))) {
+        Card(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(Modifier.padding(14.dp)) {
                 Text("你的代谢预览", fontWeight = FontWeight.Bold)
                 Text("基础代谢 ${draftTarget.bmr} kcal · TDEE ${draftTarget.tdee} kcal")
