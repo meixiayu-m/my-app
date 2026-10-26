@@ -6,6 +6,7 @@ import android.util.Base64
 import com.calorielens.app.data.ApiKeyStore
 import com.calorielens.app.domain.FoodItem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -59,19 +60,32 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
             .header("Content-Type", "application/json")
             .post(payload.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        HTTP_CLIENT.newCall(request).execute().use { response ->
+        parseResponse(executeWithRateLimitRetry(request))
+    }
+
+    private suspend fun executeWithRateLimitRetry(request: Request): String {
+        var retryCount = 0
+        while (true) {
+            val response = HTTP_CLIENT.newCall(request).execute()
+            val statusCode = response.code
             val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                val detail = runCatching {
-                    val json = JSONObject(body)
-                    json.optString("message")
-                        .ifBlank { json.optJSONObject("error")?.optString("message").orEmpty() }
-                        .ifBlank { json.optString("msg") }
-                }.getOrDefault("")
-                val suffix = detail.take(180).takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()
-                error("智谱接口错误（${response.code}）$suffix")
+            response.close()
+            if (statusCode in 200..299) return body
+
+            if (statusCode == HTTP_TOO_MANY_REQUESTS && retryCount < MAX_429_RETRIES) {
+                retryCount += 1
+                delay(RETRY_DELAY_MS)
+                continue
             }
-            parseResponse(body)
+
+            val detail = runCatching {
+                val json = JSONObject(body)
+                json.optString("message")
+                    .ifBlank { json.optJSONObject("error")?.optString("message").orEmpty() }
+                    .ifBlank { json.optString("msg") }
+            }.getOrDefault("")
+            val suffix = detail.take(180).takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()
+            error("智谱接口错误（$statusCode）$suffix")
         }
     }
 
@@ -130,6 +144,9 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
         const val API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         const val DEFAULT_MODEL = "glm-4.6v-flash"
         const val MAX_IMAGE_BYTES = 12 * 1024 * 1024
+        const val HTTP_TOO_MANY_REQUESTS = 429
+        const val MAX_429_RETRIES = 2
+        const val RETRY_DELAY_MS = 2500L
         const val PROMPT = """
 你是一个严谨的食物营养估算助手。识别图片中能看见的食物，按独立食物项返回。
 请估算每项可食部分重量（克）和整份对应的热量、蛋白质、脂肪、碳水、膳食纤维。

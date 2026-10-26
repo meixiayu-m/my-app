@@ -69,6 +69,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.calorielens.app.data.ApiKeyStore
+import com.calorielens.app.data.ProfileStore
 import com.calorielens.app.data.PersistentMealStore
 import com.calorielens.app.domain.ActivityLevel
 import com.calorielens.app.domain.FoodItem
@@ -120,7 +121,7 @@ private fun CalorieLensApp() {
     var showHistory by remember { mutableStateOf(false) }
     var showApiKey by remember { mutableStateOf(false) }
     var pendingItems by remember { mutableStateOf<List<FoodItem>?>(null) }
-    var profile by remember { mutableStateOf(UserProfile()) }
+    var profile by remember { mutableStateOf(ProfileStore.read(context)) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var fabExpanded by remember { mutableStateOf(false) }
     val target = calculateDailyTarget(profile)
@@ -236,7 +237,11 @@ private fun CalorieLensApp() {
                 onSave = { items -> store.addMeal(items); pendingItems = null },
                 modifier = Modifier.padding(padding)
             )
-            showProfile -> ProfileEditor(profile, onSave = { profile = it; showProfile = false }, Modifier.padding(padding))
+            showProfile -> ProfileEditor(profile, onSave = {
+                ProfileStore.save(context, it)
+                profile = it
+                showProfile = false
+            }, Modifier.padding(padding))
             showHistory -> HistoryScreen(meals, target, Modifier.padding(padding))
             showApiKey -> ApiKeyEditor(
                 currentKey = ApiKeyStore.read(context).orEmpty(),
