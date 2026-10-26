@@ -8,6 +8,25 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,19 +38,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EmojiFoodBeverage
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -42,6 +67,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,7 +78,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -61,6 +86,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -71,14 +97,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
@@ -102,8 +137,9 @@ import com.calorielens.app.recognition.DirectZhipuFoodRecognizer
 import com.calorielens.app.recognition.ZhipuModelCatalog
 import com.calorielens.app.recognition.ZhipuModelInfo
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
@@ -182,6 +218,7 @@ private fun CalorieLensApp() {
     CalorieLensTheme(appearance) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             CustomWallpaper(appearance.customWallpaperUri)
+            BackgroundAccents()
             CalorieLensContent(
                 appearance = appearance,
                 onAppearanceChanged = {
@@ -190,6 +227,24 @@ private fun CalorieLensApp() {
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun BackgroundAccents() {
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    Canvas(Modifier.fillMaxSize()) {
+        drawCircle(
+            color = primary.copy(alpha = 0.055f),
+            radius = size.width * 0.46f,
+            center = androidx.compose.ui.geometry.Offset(size.width * 0.92f, size.height * 0.12f)
+        )
+        drawCircle(
+            color = secondary.copy(alpha = 0.045f),
+            radius = size.width * 0.34f,
+            center = androidx.compose.ui.geometry.Offset(size.width * 0.04f, size.height * 0.72f)
+        )
     }
 }
 
@@ -221,6 +276,7 @@ private fun CustomWallpaper(uri: String?) {
 @Composable
 private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (AppAppearance) -> Unit) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val store = remember { PersistentMealStore(context) }
     val meals by store.meals.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
@@ -234,26 +290,42 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     var showManualMeal by remember { mutableStateOf(false) }
     var ratingTarget by remember { mutableStateOf<Meal?>(null) }
     var pendingItems by remember { mutableStateOf<List<FoodItem>?>(null) }
+    var pendingComment by remember { mutableStateOf("") }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
     var refining by remember { mutableStateOf(false) }
     var refinementError by remember { mutableStateOf<String?>(null) }
+    var recognitionStage by remember { mutableStateOf("正在准备照片…") }
     var profile by remember { mutableStateOf(ProfileStore.read(context)) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var fabExpanded by remember { mutableStateOf(false) }
     val target = calculateDailyTarget(profile)
+    LaunchedEffect(recognizing) {
+        if (recognizing) {
+            delay(900)
+            recognitionStage = "正在把照片交给视觉模型…"
+            delay(2400)
+            recognitionStage = "正在估算份量和营养…"
+        }
+    }
 
     val recognizeImage: (Uri) -> Unit = { uri ->
         if (!recognizing) {
             recognitionError = null
             recognizing = true
             fabExpanded = false
+            pendingImageUri = uri
+            recognitionStage = "正在读取照片…"
             scope.launch {
                 try {
-                    pendingItems = recognizer.recognize(context, uri)
+                    recognitionStage = "正在理解画面并估算营养…"
+                    val result = recognizer.recognize(context, uri)
+                    pendingItems = result.items
+                    pendingComment = result.comment
                     pendingImageUri = uri
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
+                    pendingImageUri = null
                     recognitionError = error.message ?: "识别失败，请检查手机网络和智谱设置"
                 } finally {
                     recognizing = false
@@ -284,6 +356,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     val goHome = {
         pendingItems = null
         pendingImageUri = null
+        pendingComment = ""
         refinementError = null
         showProfile = false
         showHistory = false
@@ -334,28 +407,31 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
         floatingActionButton = {
             if (pendingItems == null && !showProfile && !showHistory && !showApiKey && !showAppearance && !showManualMeal && !recognizing) {
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (fabExpanded) {
-                        SmallFloatingActionButton(onClick = {
-                            fabExpanded = false
-                            cameraPermission.launch(Manifest.permission.CAMERA)
-                        }) {
-                            Icon(Icons.Default.CameraAlt, contentDescription = "拍照识别")
-                        }
-                        SmallFloatingActionButton(onClick = {
-                            fabExpanded = false
-                            gallery.launch("image/*")
-                        }) {
-                            Icon(Icons.Default.PhotoLibrary, contentDescription = "从相册选择")
-                        }
-                        SmallFloatingActionButton(onClick = {
-                            fabExpanded = false
-                            showManualMeal = true
-                        }) {
-                            Icon(Icons.Default.Restaurant, contentDescription = "手动添加")
+                    AnimatedVisibility(
+                        visible = fabExpanded,
+                        enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.7f) + slideInVertically { it / 2 },
+                        exit = fadeOut(tween(120)) + scaleOut(targetScale = 0.7f) + slideOutVertically { it / 2 }
+                    ) {
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ActionBubble("拍照识别", Icons.Default.CameraAlt, appearance.haptics) {
+                                fabExpanded = false
+                                cameraPermission.launch(Manifest.permission.CAMERA)
+                            }
+                            ActionBubble("相册选择", Icons.Default.PhotoLibrary, appearance.haptics) {
+                                fabExpanded = false
+                                gallery.launch("image/*")
+                            }
+                            ActionBubble("手动添加", Icons.Default.Restaurant, appearance.haptics) {
+                                fabExpanded = false
+                                showManualMeal = true
+                            }
                         }
                     }
                     FloatingActionButton(
-                        onClick = { fabExpanded = !fabExpanded },
+                        onClick = {
+                            if (appearance.haptics) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            fabExpanded = !fabExpanded
+                        },
                         containerColor = MaterialTheme.colorScheme.secondary,
                         contentColor = Color.White
                     ) {
@@ -368,9 +444,13 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
         when {
             pendingItems != null -> MealEditor(
                 initialItems = pendingItems!!,
+                imageUri = pendingImageUri,
+                target = target,
+                aiComment = pendingComment,
                 refinementError = refinementError,
                 refining = refining,
-                onCancel = { pendingItems = null; pendingImageUri = null },
+                hapticsEnabled = appearance.haptics,
+                onCancel = { pendingItems = null; pendingImageUri = null; pendingComment = "" },
                 onRefine = { items, note ->
                     val imageUri = pendingImageUri
                     if (imageUri != null && !refining && note.isNotBlank()) {
@@ -378,7 +458,9 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                         refining = true
                         scope.launch {
                             try {
-                                pendingItems = recognizer.refine(context, imageUri, items, note)
+                                val result = recognizer.refine(context, imageUri, items, note)
+                                pendingItems = result.items
+                                pendingComment = result.comment
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (error: Exception) {
@@ -394,6 +476,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                         ratingTarget = store.addMealAndReturn(items, title = title)
                         pendingItems = null
                         pendingImageUri = null
+                        pendingComment = ""
                     }
                 },
                 modifier = Modifier.padding(padding)
@@ -435,7 +518,10 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                 meals = meals,
                 target = target,
                 recognizing = recognizing,
+                recognizingImageUri = pendingImageUri.takeIf { recognizing },
+                recognitionStage = recognitionStage,
                 errorMessage = recognitionError,
+                hapticsEnabled = appearance.haptics,
                 onDismissError = { recognitionError = null },
                 onDelete = { meal -> store.deleteMeal(meal) },
                 onRestore = store::restoreMeal,
@@ -447,6 +533,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     ratingTarget?.let { meal ->
         RatingDialog(
             meal = meal,
+            hapticsEnabled = appearance.haptics,
             onRate = { rating -> store.updateMeal(meal, meal.items, meal.title, rating); ratingTarget = null },
             onSkip = { ratingTarget = null }
         )
@@ -456,113 +543,409 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
 @Composable
 private fun MealEditor(
     initialItems: List<FoodItem>,
+    imageUri: Uri?,
+    target: com.calorielens.app.domain.DailyTarget,
+    aiComment: String,
     refinementError: String?,
     refining: Boolean,
+    hapticsEnabled: Boolean,
     onCancel: () -> Unit,
     onRefine: (List<FoodItem>, String) -> Unit,
     onSave: (List<FoodItem>, String) -> Unit,
     modifier: Modifier
 ) {
+    val haptic = LocalHapticFeedback.current
     var items by remember(initialItems) { mutableStateOf(initialItems) }
     var title by remember { mutableStateOf(defaultMealTitle()) }
     var mealMenuOpen by remember { mutableStateOf(false) }
     var correctionEnabled by remember(initialItems) { mutableStateOf(false) }
     var correctionText by remember(initialItems) { mutableStateOf("") }
+    val mealNutrition = items.nutritionTotal()
+    val itemValuesChanged = items != initialItems
+    val canRefine = itemValuesChanged || correctionText.isNotBlank()
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("🍱", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.size(8.dp))
-            Column {
-                Text("确认识别结果", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("云端模型结果是估算值，请检查食物和份量后保存。", style = MaterialTheme.typography.bodySmall)
-            }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("这餐，猜得怎么样？", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("可以改餐次、食物名称和份量，再让 AI 一起重新估算。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        MealPreviewHeader(imageUri = imageUri, title = title, nutrition = mealNutrition)
         Box {
-            OutlinedButton(onClick = { mealMenuOpen = true }, modifier = Modifier.fillMaxWidth()) { Text("餐次：$title（可修改）") }
+            OutlinedButton(
+                onClick = {
+                    if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    mealMenuOpen = true
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("🍽  $title  ·  点击更换餐次") }
             DropdownMenu(expanded = mealMenuOpen, onDismissRequest = { mealMenuOpen = false }) {
                 MEAL_TYPES.forEach { option ->
-                    DropdownMenuItem(text = { Text(option) }, onClick = { title = option; mealMenuOpen = false })
+                    DropdownMenuItem(text = { Text(option) }, onClick = {
+                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        title = option
+                        mealMenuOpen = false
+                    })
                 }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = correctionEnabled, onCheckedChange = { correctionEnabled = it })
-            Text("识别不准？用文字告诉 AI 纠正，并结合原图重新计算")
-        }
-        if (correctionEnabled) {
-            androidx.compose.material3.OutlinedTextField(
-                value = correctionText,
-                onValueChange = { correctionText = it },
-                label = { Text("例如：蒸鸡蛋糕，不是冻豆腐；另外还有半个苹果") },
-                minLines = 2,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Button(
-                onClick = { onRefine(items, correctionText) },
-                enabled = correctionText.isNotBlank() && !refining,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text(if (refining) "AI 正在结合图片修正…" else "用 AI 修正识别结果") }
-            refinementError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        MealNutritionSummary(nutrition = mealNutrition, target = target)
+        AiMealComment(comment = aiComment.ifBlank { localMealRemark(mealNutrition, target) })
+
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("识别清单", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
+                Text("${items.size} 项", modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+            }
         }
         items.forEachIndexed { index, item ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(Modifier.padding(14.dp)) {
-                    Text("${item.name} · 本份约 ${item.nutrition().calories} kcal", fontWeight = FontWeight.SemiBold)
-                    Text("参考密度：${item.caloriesPer100g.toInt()} kcal / 100g · 识别份量：${item.grams.toInt()}g", style = MaterialTheme.typography.bodySmall)
-                    androidx.compose.material3.OutlinedTextField(
-                        value = item.name,
-                        onValueChange = { value ->
-                            items = items.toMutableList().also { it[index] = item.copy(name = value) }
-                        },
-                        label = { Text("食物种类（可直接修改）") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    androidx.compose.material3.OutlinedTextField(
-                        value = item.grams.toInt().toString(),
-                        onValueChange = { value ->
-                            val grams = value.toDoubleOrNull() ?: item.grams
-                            items = items.toMutableList().also { it[index] = item.copy(grams = grams.coerceAtLeast(1.0)) }
-                        },
-                        label = { Text("份量（克）") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text("识别置信度 ${(item.confidence * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+            EditableFoodCard(
+                item = item,
+                expandedByDefault = index == 0,
+                hapticsEnabled = hapticsEnabled,
+                onChanged = { updated -> items = items.toMutableList().also { it[index] = updated } }
+            )
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth().animateContentSize(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f))
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                    Spacer(Modifier.size(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("还是不太像？", fontWeight = FontWeight.Bold)
+                        Text("改完名称后也可以直接用一句话告诉 AI。", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Checkbox(checked = correctionEnabled, onCheckedChange = {
+                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        correctionEnabled = it
+                    })
+                }
+                AnimatedVisibility(
+                    visible = correctionEnabled,
+                    enter = fadeIn() + slideInVertically { -it / 3 } + scaleIn(initialScale = 0.96f),
+                    exit = fadeOut() + slideOutVertically { -it / 3 } + scaleOut(targetScale = 0.96f)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.OutlinedTextField(
+                            value = correctionText,
+                            onValueChange = { correctionText = it },
+                            label = { Text("例如：蒸鸡蛋糕，不是冻豆腐；另外还有半个苹果") },
+                            minLines = 2,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        if (itemValuesChanged) {
+                            Text("已检测到名称或克数变化；修正时会把当前清单一起发给 AI 重算。", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                        }
+                        if (refinementError != null) Text(refinementError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Button(
+                    onClick = {
+                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onRefine(items, buildRefinementInstruction(correctionText, itemValuesChanged))
+                    },
+                    enabled = canRefine && !refining,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp)
+                ) {
+                    if (refining) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                        Spacer(Modifier.size(8.dp))
+                    } else {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
+                    }
+                    Text(if (refining) "AI 正在看图重新估算…" else "AI 校正并重算")
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onCancel) { Text("取消") }
-            Button(onClick = { onSave(items, title) }) {
-                Icon(Icons.Default.Restaurant, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(6.dp))
-                Text("保存餐食")
+        if (itemValuesChanged) {
+            Text("当前热量仍按旧营养密度计算；点击上方 AI 校正后会按新名称和克数更新。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onCancel, modifier = Modifier.weight(0.38f), shape = RoundedCornerShape(18.dp)) { Text("取消") }
+            Button(
+                onClick = {
+                    if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSave(items, title)
+                },
+                modifier = Modifier.weight(0.62f),
+                shape = RoundedCornerShape(18.dp)
+            ) {
+                Icon(Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("就这样，记下来")
             }
         }
-        Spacer(Modifier.height(80.dp))
+        Spacer(Modifier.height(72.dp))
+    }
+}
+
+private fun buildRefinementInstruction(note: String, itemValuesChanged: Boolean): String = buildString {
+    if (itemValuesChanged) append("用户已经修改了清单中的食物名称或克数，请保留这些修改，并按新名称和克数重新估算营养。")
+    if (note.isNotBlank()) {
+        if (isNotEmpty()) append("\n")
+        append("用户补充：${note.trim()}")
     }
 }
 
 @Composable
-private fun MealRatingBar(rating: Int, onRatingChanged: (Int) -> Unit) {
+private fun MealPreviewHeader(imageUri: Uri?, title: String, nutrition: Nutrition) {
+    Box(
+        Modifier.fillMaxWidth().height(210.dp).clip(RoundedCornerShape(28.dp))
+            .background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)))
+    ) {
+        imageUri?.let { LocalUriImage(it, Modifier.fillMaxSize(), alpha = 0.88f) }
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)))
+            )
+        )
+        Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
+            Surface(shape = CircleShape, color = Color.White.copy(alpha = 0.18f)) {
+                Text(title, color = Color.White, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelLarge)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("${nutrition.calories} kcal", color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text("AI 结合图片估算了这一份", color = Color.White.copy(alpha = 0.78f), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun LocalUriImage(uri: Uri, modifier: Modifier, alpha: Float = 1f) {
+    val context = LocalContext.current
+    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, uri.toString()) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                var sample = 1
+                while (bounds.outWidth / sample > 1600 || bounds.outHeight / sample > 1600) sample *= 2
+                context.contentResolver.openInputStream(uri)?.use {
+                    BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+                }
+            }.getOrNull()
+        }
+    }
+    bitmap?.let {
+        Image(bitmap = it, contentDescription = "餐食照片", modifier = modifier, contentScale = ContentScale.Crop, alpha = alpha)
+    }
+}
+
+@Composable
+private fun MealNutritionSummary(nutrition: Nutrition, target: com.calorielens.app.domain.DailyTarget) {
+    val targets = macroTargets(target.targetCalories)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            NutritionRing(
+                value = nutrition.calories.toFloat(),
+                target = target.targetCalories.toFloat(),
+                label = "本餐热量",
+                center = "${nutrition.calories}",
+                unit = "kcal",
+                modifier = Modifier.size(128.dp),
+                strokeWidth = 11.dp
+            )
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                Text("占今日目标", fontWeight = FontWeight.Bold)
+                MacroBar("蛋白质", nutrition.protein, targets.protein, MaterialTheme.colorScheme.primary)
+                MacroBar("碳水", nutrition.carbs, targets.carbs, MaterialTheme.colorScheme.secondary)
+                MacroBar("脂肪", nutrition.fat, targets.fat, Color(0xFFE1B64B))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MacroBar(label: String, value: Double, target: Double, color: Color) {
+    val progress by animateFloatAsState(
+        targetValue = (value / target.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f),
+        animationSpec = tween(700, easing = FastOutSlowInEasing),
+        label = "$label-progress"
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row {
+            Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+            Text("${value.toInt()}g · ${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, color = color)
+        }
+        Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(color.copy(alpha = 0.14f))) {
+            Box(Modifier.fillMaxWidth(progress).height(6.dp).clip(CircleShape).background(color))
+        }
+    }
+}
+
+@Composable
+private fun NutritionRing(
+    value: Float,
+    target: Float,
+    label: String,
+    center: String,
+    unit: String,
+    modifier: Modifier,
+    strokeWidth: androidx.compose.ui.unit.Dp
+) {
+    val progress = (value / target.coerceAtLeast(1f)).coerceIn(0f, 1f)
+    val animated = remember { Animatable(0f) }
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    val progressColor = MaterialTheme.colorScheme.primary
+    LaunchedEffect(progress) { animated.animateTo(progress, tween(850, easing = FastOutSlowInEasing)) }
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawArc(
+                color = trackColor,
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
+            )
+            drawArc(
+                color = progressColor,
+                startAngle = -90f,
+                sweepAngle = 360f * animated.value,
+                useCenter = false,
+                style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(center, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(unit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun AiMealComment(comment: String) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+            .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)).padding(14.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.18f)) {
+            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(8.dp).size(18.dp))
+        }
+        Spacer(Modifier.size(10.dp))
+        Column {
+            Text("饭搭子说", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+            Text(comment, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun EditableFoodCard(item: FoodItem, expandedByDefault: Boolean, hapticsEnabled: Boolean, onChanged: (FoodItem) -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    var expanded by remember(item.id) { mutableStateOf(expandedByDefault) }
+    Card(
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
+                    Icon(Icons.Default.EmojiFoodBeverage, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(9.dp).size(20.dp))
+                }
+                Spacer(Modifier.size(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(item.name.ifBlank { "待确认食物" }, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${item.grams.toInt()}g · 本份 ${item.nutrition().calories} kcal", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = {
+                    if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    expanded = !expanded
+                }) { Text(if (expanded) "收起" else "修改") }
+            }
+            AnimatedVisibility(
+                visible = expanded,
+                enter = fadeIn() + slideInVertically { -it / 4 } + scaleIn(initialScale = 0.97f),
+                exit = fadeOut() + slideOutVertically { -it / 4 } + scaleOut(targetScale = 0.97f)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = item.name,
+                        onValueChange = { onChanged(item.copy(name = it)) },
+                        label = { Text("食物种类") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    androidx.compose.material3.OutlinedTextField(
+                        value = item.grams.toInt().toString(),
+                        onValueChange = { value ->
+                            value.toDoubleOrNull()?.let { onChanged(item.copy(grams = it.coerceAtLeast(1.0))) }
+                        },
+                        label = { Text("份量（克）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    Text(
+                        "参考 ${item.caloriesPer100g.toInt()} kcal / 100g · 识别把握 ${(item.confidence * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class MacroTargets(val protein: Double, val carbs: Double, val fat: Double)
+
+private fun macroTargets(calories: Int): MacroTargets = MacroTargets(
+    protein = calories * 0.20 / 4.0,
+    carbs = calories * 0.50 / 4.0,
+    fat = calories * 0.30 / 9.0
+)
+
+private fun localMealRemark(nutrition: Nutrition, target: com.calorielens.app.domain.DailyTarget): String {
+    val ratio = nutrition.calories.toDouble() / target.targetCalories.coerceAtLeast(1)
+    return when {
+        ratio > 0.48 -> "这一餐份量比较扎实，下一餐可以清淡一点，给全天留些空间。"
+        nutrition.protein < 15 -> "看起来挺香，蛋白质还可以再补一点；数值只是图片估算。"
+        nutrition.fiber < 4 -> "主食和蛋白质都有了，再添点蔬菜会更均衡。"
+        else -> "搭配看起来不错，记得这只是根据图片做出的粗略估算。"
+    }
+}
+
+@Composable
+private fun MealRatingBar(rating: Int, onRatingChanged: (Int) -> Unit, hapticsEnabled: Boolean) {
+    val haptic = LocalHapticFeedback.current
     Column {
         Text("这顿饭好吃吗？", fontWeight = FontWeight.SemiBold)
         Row(verticalAlignment = Alignment.CenterVertically) {
             repeat(5) { index ->
+                val selected = index < rating
+                val scale by animateFloatAsState(
+                    targetValue = if (selected) 1.14f else 1f,
+                    animationSpec = spring(dampingRatio = 0.45f, stiffness = 520f),
+                    label = "rating-star"
+                )
                 Text(
-                    text = if (index < rating) "★" else "☆",
-                    color = if (index < rating) Color(0xFFF2B544) else MaterialTheme.colorScheme.outline,
+                    text = if (selected) "★" else "☆",
+                    color = if (selected) Color(0xFFF2B544) else MaterialTheme.colorScheme.outline,
                     style = MaterialTheme.typography.headlineMedium,
                     modifier = Modifier
-                        .clickable { onRatingChanged(index + 1) }
+                        .graphicsLayer { scaleX = scale; scaleY = scale }
+                        .clickable {
+                            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onRatingChanged(index + 1)
+                        }
                         .padding(end = 3.dp)
                 )
             }
@@ -572,7 +955,7 @@ private fun MealRatingBar(rating: Int, onRatingChanged: (Int) -> Unit) {
 }
 
 @Composable
-private fun RatingDialog(meal: Meal, onRate: (Int) -> Unit, onSkip: () -> Unit) {
+private fun RatingDialog(meal: Meal, hapticsEnabled: Boolean, onRate: (Int) -> Unit, onSkip: () -> Unit) {
     var rating by remember(meal.id) { mutableStateOf(0) }
     AlertDialog(
         onDismissRequest = onSkip,
@@ -580,7 +963,7 @@ private fun RatingDialog(meal: Meal, onRate: (Int) -> Unit, onSkip: () -> Unit) 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${meal.title} 已保存，可以给这顿饭一个口味评分。")
-                MealRatingBar(rating = rating, onRatingChanged = { rating = it })
+                MealRatingBar(rating = rating, onRatingChanged = { rating = it }, hapticsEnabled = hapticsEnabled)
             }
         },
         confirmButton = {
@@ -658,98 +1041,328 @@ private fun HomeScreen(
     meals: List<Meal>,
     target: com.calorielens.app.domain.DailyTarget,
     recognizing: Boolean,
+    recognizingImageUri: Uri?,
+    recognitionStage: String,
     errorMessage: String?,
+    hapticsEnabled: Boolean,
     onDismissError: () -> Unit,
     onDelete: (Meal) -> Unit,
     onRestore: (Meal) -> Unit,
     onEditProfile: () -> Unit,
     modifier: Modifier
 ) {
+    val haptic = LocalHapticFeedback.current
     val todayMeals = meals.filter { it.localDate() == LocalDate.now() }
     var deleteCandidate by remember { mutableStateOf<Meal?>(null) }
     var undoMeal by remember { mutableStateOf<Meal?>(null) }
     val consumed = todayMeals.sumOf { it.nutrition().calories }
-    val progress = (consumed.toFloat() / target.targetCalories.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val todayNutrition = todayMeals.totalNutrition()
     LazyColumn(
         modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
             Spacer(Modifier.height(8.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.extraLarge,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(Modifier.padding(18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("今日小目标", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text("保持节奏，慢慢变好 🌿", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surface)
-                    Spacer(Modifier.height(12.dp))
-                    Text("已摄入 $consumed kcal / 目标 ${target.targetCalories} kcal")
-                    Text("还可摄入 ${(target.targetCalories - consumed).coerceAtLeast(0)} kcal", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                    Text("基础代谢 ${target.bmr} kcal · 活动消耗 ${target.tdee - target.bmr} kcal", style = MaterialTheme.typography.bodySmall)
-                    Button(onClick = onEditProfile, modifier = Modifier.padding(top = 8.dp)) {
-                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.size(6.dp))
-                        Text("调整个人目标")
-                    }
+            GreetingHero(
+                message = homeGreeting(todayMeals, consumed, target.targetCalories),
+                mealCount = todayMeals.size
+            )
+            Spacer(Modifier.height(14.dp))
+            DailyNutritionCard(
+                nutrition = todayNutrition,
+                target = target,
+                onEditProfile = {
+                    if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onEditProfile()
                 }
+            )
+            AnimatedVisibility(
+                visible = recognizing,
+                enter = fadeIn() + slideInVertically { -it / 3 } + scaleIn(initialScale = 0.96f),
+                exit = fadeOut() + slideOutVertically { -it / 3 } + scaleOut(targetScale = 0.96f)
+            ) {
+                RecognitionLoadingCard(imageUri = recognizingImageUri, stage = recognitionStage, consumed = consumed)
             }
-            if (recognizing) Text("正在上传图片并分析…", Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.secondary)
             if (errorMessage != null) {
                 val message = errorMessage
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                        Text("关闭", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp))
+                        TextButton(onClick = onDismissError) { Text("关闭") }
                         IconButton(onClick = onDismissError) { Icon(Icons.Default.Close, "关闭提示") }
                     }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                Text("🍽️", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.size(8.dp))
-                Text("今天的餐食", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Column(Modifier.weight(1f)) {
+                    Text("今天的餐食", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(if (todayMeals.isEmpty()) "第一口，也值得认真记下来" else "今天已经记下 ${todayMeals.size} 餐", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
+                    Text("$consumed kcal", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp), style = MaterialTheme.typography.labelMedium)
+                }
             }
             undoMeal?.let { deleted ->
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.16f)), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("已删除「${deleted.title}」", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                        TextButton(onClick = { undoMeal = null; onRestore(deleted) }) { Text("撤回") }
+                AnimatedVisibility(visible = true, enter = fadeIn() + slideInVertically { -it }) {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.16f)), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("已删除「${deleted.title}」", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = {
+                                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                undoMeal = null
+                                onRestore(deleted)
+                            }) { Text("撤回") }
+                            IconButton(onClick = { undoMeal = null }) {
+                                Icon(Icons.Default.Close, contentDescription = "关闭撤回提示")
+                            }
+                        }
                     }
                 }
             }
         }
         if (todayMeals.isEmpty()) item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(Modifier.padding(18.dp)) {
-                    Text("还没有记录", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("点击右下角，选择拍照或从相册挑一张饭菜图片。", style = MaterialTheme.typography.bodyMedium)
-                }
+            EmptyMealCard {
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             }
         }
-        items(todayMeals, key = { it.id }) { meal -> MealCard(meal, target, onDelete = { deleteCandidate = meal }) }
+        items(todayMeals, key = { it.id }) { meal ->
+            MealCard(meal, target, onDelete = {
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                deleteCandidate = meal
+            })
+        }
     }
     deleteCandidate?.let { meal ->
         AlertDialog(
             onDismissRequest = { deleteCandidate = null },
             title = { Text("确认删除？") },
             text = { Text("删除「${meal.title}」后会从本机日志移除，但你可以在提示出现后撤回。") },
-            confirmButton = { TextButton(onClick = { deleteCandidate = null; undoMeal = meal; onDelete(meal) }) { Text("删除") } },
+            confirmButton = { TextButton(onClick = {
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                deleteCandidate = null
+                undoMeal = meal
+                onDelete(meal)
+            }) { Text("删除") } },
             dismissButton = { TextButton(onClick = { deleteCandidate = null }) { Text("取消") } }
         )
+    }
+}
+
+@Composable
+private fun GreetingHero(message: Pair<String, String>, mealCount: Int) {
+    val visible = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { visible.animateTo(1f, tween(650, easing = FastOutSlowInEasing)) }
+    Row(
+        Modifier.fillMaxWidth().graphicsLayer {
+            alpha = visible.value
+            translationY = (1f - visible.value) * 24f
+        },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(message.first, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(3.dp))
+            Text(message.second, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.22f)) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("$mealCount", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("今日餐数", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyNutritionCard(
+    nutrition: Nutrition,
+    target: com.calorielens.app.domain.DailyTarget,
+    onEditProfile: () -> Unit
+) {
+    val macroTarget = macroTargets(target.targetCalories)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(30.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                NutritionRing(
+                    value = nutrition.calories.toFloat(),
+                    target = target.targetCalories.toFloat(),
+                    label = "已摄入",
+                    center = "${nutrition.calories}",
+                    unit = "kcal",
+                    modifier = Modifier.size(142.dp),
+                    strokeWidth = 12.dp
+                )
+                Spacer(Modifier.width(18.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Text("今日节奏", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (nutrition.calories <= target.targetCalories) "还可摄入 ${target.targetCalories - nutrition.calories} kcal" else "超出目标 ${nutrition.calories - target.targetCalories} kcal",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    MacroBar("蛋白质", nutrition.protein, macroTarget.protein, MaterialTheme.colorScheme.primary)
+                    MacroBar("碳水", nutrition.carbs, macroTarget.carbs, MaterialTheme.colorScheme.secondary)
+                    MacroBar("脂肪", nutrition.fat, macroTarget.fat, Color(0xFFE1B64B))
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("基础代谢 ${target.bmr} · 活动消耗 ${target.tdee - target.bmr} kcal", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                TextButton(onClick = onEditProfile) { Text("调整目标") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecognitionLoadingCard(imageUri: Uri?, stage: String, consumed: Int) {
+    val pulse by rememberInfiniteTransition(label = "recognition-loading").animateFloat(
+        initialValue = 0.08f,
+        targetValue = 0.26f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "recognition-pulse"
+    )
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                    imageUri?.let { LocalUriImage(it, Modifier.fillMaxSize(), alpha = 0.78f) }
+                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = pulse)))
+                    CircularProgressIndicator(modifier = Modifier.size(26.dp).align(Alignment.Center), strokeWidth = 3.dp, color = Color.White)
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("正在替你看这顿饭", fontWeight = FontWeight.Bold)
+                    Text(stage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("今天已记录 $consumed kcal", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+            )
+            RunningCat(
+                modifier = Modifier.fillMaxWidth().height(38.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun RunningCat(modifier: Modifier, color: Color) {
+    val motion by rememberInfiniteTransition(label = "running-cat").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1450, easing = FastOutSlowInEasing)),
+        label = "running-cat-progress"
+    )
+    Canvas(modifier) {
+        val runWidth = size.width * 0.74f
+        val x = size.width * 0.08f + runWidth * motion
+        val groundY = size.height * 0.78f
+        val bob = kotlin.math.sin(motion.toDouble() * Math.PI * 8.0).toFloat() * 1.8f
+        val stride = kotlin.math.sin(motion.toDouble() * Math.PI * 10.0).toFloat() * 4.5f
+        val stroke = 2.2.dp.toPx()
+
+        drawLine(color.copy(alpha = 0.24f), androidx.compose.ui.geometry.Offset(0f, groundY + 7.dp.toPx()), androidx.compose.ui.geometry.Offset(size.width, groundY + 7.dp.toPx()), strokeWidth = 1.dp.toPx())
+        drawLine(color, androidx.compose.ui.geometry.Offset(x - 17.dp.toPx(), groundY - 2.dp.toPx() + bob), androidx.compose.ui.geometry.Offset(x - 12.dp.toPx() + stride, groundY + 5.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawLine(color, androidx.compose.ui.geometry.Offset(x + 10.dp.toPx(), groundY - 2.dp.toPx() + bob), androidx.compose.ui.geometry.Offset(x + 5.dp.toPx() - stride, groundY + 5.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawOval(
+            color = color,
+            topLeft = androidx.compose.ui.geometry.Offset(x - 20.dp.toPx(), groundY - 20.dp.toPx() + bob),
+            size = androidx.compose.ui.geometry.Size(35.dp.toPx(), 20.dp.toPx())
+        )
+        drawCircle(color, radius = 9.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x + 17.dp.toPx(), groundY - 19.dp.toPx() + bob))
+        drawCircle(Color.White, radius = 1.5.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x + 20.dp.toPx(), groundY - 21.dp.toPx() + bob))
+        val ears = Path().apply {
+            moveTo(x + 11.dp.toPx(), groundY - 25.dp.toPx() + bob)
+            lineTo(x + 14.dp.toPx(), groundY - 33.dp.toPx() + bob)
+            lineTo(x + 18.dp.toPx(), groundY - 26.dp.toPx() + bob)
+            moveTo(x + 19.dp.toPx(), groundY - 26.dp.toPx() + bob)
+            lineTo(x + 23.dp.toPx(), groundY - 32.dp.toPx() + bob)
+            lineTo(x + 25.dp.toPx(), groundY - 24.dp.toPx() + bob)
+        }
+        drawPath(ears, color)
+        val tail = Path().apply {
+            moveTo(x - 19.dp.toPx(), groundY - 14.dp.toPx() + bob)
+            cubicTo(
+                x - 33.dp.toPx(), groundY - 27.dp.toPx() + bob,
+                x - 30.dp.toPx(), groundY - 5.dp.toPx(),
+                x - 38.dp.toPx(), groundY - 14.dp.toPx()
+            )
+        }
+        drawPath(tail, color, style = Stroke(width = stroke, cap = StrokeCap.Round))
+    }
+}
+
+@Composable
+private fun EmptyMealCard(onTouch: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(28.dp))
+            .background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f), MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f))))
+            .clickable(onClick = onTouch)
+    ) {
+        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("🥑", style = MaterialTheme.typography.displaySmall)
+            Text("今天还是空白页", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("拍下第一餐，让这一页慢慢丰富起来", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun ActionBubble(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    hapticsEnabled: Boolean,
+    onClick: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    Row(
+        Modifier.clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable {
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(7.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+private fun homeGreeting(meals: List<Meal>, consumed: Int, target: Int): Pair<String, String> {
+    val hour = LocalTime.now().hour
+    val prefix = when {
+        hour < 5 -> "夜深了"
+        hour < 11 -> "早上好"
+        hour < 14 -> "中午好"
+        hour < 18 -> "下午好"
+        else -> "晚上好"
+    }
+    val todayHas = { meal: String -> meals.any { it.title == meal } }
+    return when {
+        hour < 10 && !todayHas("早餐") -> prefix to "今天早餐吃的什么呀？拍下来我帮你看看。"
+        hour in 11..13 && !todayHas("午餐") -> prefix to "午饭时间到，今天想记录哪一道？"
+        hour in 17..20 && !todayHas("晚餐") -> prefix to "忙了一天，晚饭别忘了记一笔。"
+        consumed > target -> prefix to "今天的热量已经超目标一点，接下来喝点水、慢慢走走吧。"
+        meals.isEmpty() -> prefix to "今天想吃什么？第一口也值得认真记下来。"
+        else -> prefix to "已经记下 ${meals.size} 餐，继续保持这份小小的记录感。"
     }
 }
 
@@ -797,9 +1410,14 @@ private fun HistoryScreen(meals: List<Meal>, target: com.calorielens.app.domain.
 private fun MealCard(meal: Meal, target: com.calorielens.app.domain.DailyTarget, onDelete: (() -> Unit)?) {
     val n = meal.nutrition()
     val score = scoreMeal(meal, target)
+    val appeared = remember(meal.id) { Animatable(0f) }
+    LaunchedEffect(meal.id) { appeared.animateTo(1f, tween(420, easing = FastOutSlowInEasing)) }
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth().graphicsLayer {
+            alpha = appeared.value
+            translationY = (1f - appeared.value) * 20f
+        },
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -926,6 +1544,7 @@ private fun AppearanceEditor(current: AppAppearance, onSave: (AppAppearance) -> 
     var theme by remember(current) { mutableStateOf(current.theme) }
     var wallpaper by remember(current) { mutableStateOf(current.wallpaper) }
     var glass by remember(current) { mutableStateOf(current.glass) }
+    var haptics by remember(current) { mutableStateOf(current.haptics) }
     var customWallpaperUri by remember(current) { mutableStateOf(current.customWallpaperUri) }
     var themeMenuOpen by remember { mutableStateOf(false) }
     var wallpaperMenuOpen by remember { mutableStateOf(false) }
@@ -955,6 +1574,13 @@ private fun AppearanceEditor(current: AppAppearance, onSave: (AppAppearance) -> 
             }
             Switch(checked = glass, onCheckedChange = { glass = it })
         }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text("触感反馈", fontWeight = FontWeight.SemiBold)
+                Text("选择餐次、评分和保存时给出轻触反馈", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = haptics, onCheckedChange = { haptics = it })
+        }
         OutlinedButton(onClick = { wallpaperPicker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth()) {
             Text(if (customWallpaperUri == null) "从相册选择自定义壁纸" else "更换自定义壁纸")
         }
@@ -972,10 +1598,10 @@ private fun AppearanceEditor(current: AppAppearance, onSave: (AppAppearance) -> 
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("预览", fontWeight = FontWeight.Bold)
-                Text("识别成功后会先进入确认页，你可以改餐次、星级和份量，再保存。")
+                Text("识别成功后会先进入确认页，你可以改餐次、食物名称和份量；保存成功后再给口味打星。")
             }
         }
-        Button(onClick = { onSave(AppAppearance(theme, wallpaper, glass, customWallpaperUri)) }) { Text("应用外观") }
+        Button(onClick = { onSave(AppAppearance(theme, wallpaper, glass, customWallpaperUri, haptics)) }) { Text("应用外观") }
     }
 }
 
@@ -1043,5 +1669,10 @@ private fun Meal.localDate(): LocalDate = Instant.ofEpochMilli(timestamp).atZone
 
 private fun List<Meal>.totalNutrition(): Nutrition = fold(Nutrition(0, 0.0, 0.0, 0.0, 0.0)) { total, meal ->
     val n = meal.nutrition()
+    Nutrition(total.calories + n.calories, total.protein + n.protein, total.fat + n.fat, total.carbs + n.carbs, total.fiber + n.fiber)
+}
+
+private fun List<FoodItem>.nutritionTotal(): Nutrition = fold(Nutrition(0, 0.0, 0.0, 0.0, 0.0)) { total, item ->
+    val n = item.nutrition()
     Nutrition(total.calories + n.calories, total.protein + n.protein, total.fat + n.fat, total.carbs + n.carbs, total.fiber + n.fiber)
 }

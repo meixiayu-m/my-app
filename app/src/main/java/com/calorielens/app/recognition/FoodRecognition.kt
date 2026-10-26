@@ -36,9 +36,14 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+data class RecognitionResult(
+    val items: List<FoodItem>,
+    val comment: String = ""
+)
+
 interface FoodRecognizer {
-    suspend fun recognize(context: Context, imageUri: Uri): List<FoodItem>
-    suspend fun refine(context: Context, imageUri: Uri, currentItems: List<FoodItem>, userCorrection: String): List<FoodItem>
+    suspend fun recognize(context: Context, imageUri: Uri): RecognitionResult
+    suspend fun refine(context: Context, imageUri: Uri, currentItems: List<FoodItem>, userCorrection: String): RecognitionResult
 }
 
 /**
@@ -46,7 +51,7 @@ interface FoodRecognizer {
  * Key 从 Android Keystore 加密存储读取，不会写进源码、Gradle 或 APK 常量。
  */
 class DirectZhipuFoodRecognizer : FoodRecognizer {
-    override suspend fun recognize(context: Context, imageUri: Uri): List<FoodItem> = request(
+    override suspend fun recognize(context: Context, imageUri: Uri): RecognitionResult = request(
         context = context,
         imageUri = imageUri,
         systemPrompt = PROMPT,
@@ -58,7 +63,7 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
         imageUri: Uri,
         currentItems: List<FoodItem>,
         userCorrection: String
-    ): List<FoodItem> {
+    ): RecognitionResult {
         val currentJson = JSONArray().apply {
             currentItems.forEach { item ->
                 put(JSONObject()
@@ -88,7 +93,7 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
         imageUri: Uri,
         systemPrompt: String,
         userText: String
-    ): List<FoodItem> = withContext(Dispatchers.IO) {
+    ): RecognitionResult = withContext(Dispatchers.IO) {
         val apiKey = ApiKeyStore.read(context)?.trim().orEmpty()
         require(apiKey.isNotEmpty()) { "请先在设置中填写智谱 API Key" }
         val model = ApiKeyStore.readModel(context)?.trim()
@@ -240,7 +245,7 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
         }
     }
 
-    private fun parseResponse(body: String): List<FoodItem> {
+    private fun parseResponse(body: String): RecognitionResult {
         val response = JSONObject(body)
         val choices = response.optJSONArray("choices")
             ?: error("智谱返回缺少 choices，可能是模型或接口版本不匹配")
@@ -272,14 +277,19 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
         val jsonStart = cleaned.indexOf('{')
         val jsonEnd = cleaned.lastIndexOf('}')
         val jsonText = if (jsonStart >= 0 && jsonEnd > jsonStart) cleaned.substring(jsonStart, jsonEnd + 1) else cleaned
-        val items = runCatching { JSONObject(jsonText).optJSONArray("items") ?: JSONArray() }
+        val payload = runCatching { JSONObject(jsonText) }
             .getOrElse { error("智谱返回内容不是有效 JSON，请重试或更换支持图片的模型") }
-        return buildList {
+        val items = payload.optJSONArray("items") ?: JSONArray()
+        val parsedItems = buildList {
             for (index in 0 until items.length()) {
                 val item = items.optJSONObject(index) ?: continue
                 add(item.toFoodItem())
             }
         }.ifEmpty { listOf(unknownFood()) }
+        return RecognitionResult(
+            items = parsedItems,
+            comment = payload.optString("comment").trim()
+        )
     }
 
     private fun JSONObject.toFoodItem(): FoodItem {
@@ -314,8 +324,9 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
 请估算每项可食部分重量（克）和整份对应的热量、蛋白质、脂肪、碳水、膳食纤维；零食、水果、饮料和餐后三餐之外的加餐也要单独识别，不要忽略。
 返回的 calories/protein/fat/carbs/fiber 必须是“识别出的这一份”的具体数值，App 会同时换算并展示每 100g 的参考值。
 只能返回 JSON，不要 Markdown，不要解释文字，格式必须是：
-{"items":[{"name":"食物名称","grams":150,"calories":174,"protein":3.9,"fat":0.5,"carbs":38.9,"fiber":0.5,"confidence":0.86}]}
+{"items":[{"name":"食物名称","grams":150,"calories":174,"protein":3.9,"fat":0.5,"carbs":38.9,"fiber":0.5,"confidence":0.86}],"comment":"一句自然、克制的餐食点评"}
 看不清时可以返回空 items，不要编造固定的菜名；所有数值都必须是非负数字，confidence 在 0 到 1 之间。
+comment 最多 45 个汉字，结合这餐最明显的营养特点给出一句友好建议；不做疾病诊断，不制造身材焦虑，不确定油量时明确是估算。
 """
         const val CORRECTION_PROMPT = """
 你是一个严谨的食物营养估算助手。用户正在纠正之前的图片识别结果。
@@ -324,8 +335,9 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
 如果用户修改了名称，要重新估算该食物的热量及营养密度；不要把旧食物的营养值照搬到新名称上。
 返回完整的食物列表，每项为本份可食重量（克）与本份的具体营养值，不是每 100g 的值。
 只能返回 JSON，不要 Markdown 或解释。格式：
-{"items":[{"name":"食物名称","grams":150,"calories":174,"protein":3.9,"fat":0.5,"carbs":38.9,"fiber":0.5,"confidence":0.86}]}
+{"items":[{"name":"食物名称","grams":150,"calories":174,"protein":3.9,"fat":0.5,"carbs":38.9,"fiber":0.5,"confidence":0.86}],"comment":"一句自然、克制的餐食点评"}
 所有数值必须是非负数字，confidence 在 0 到 1 之间。
+comment 最多 45 个汉字，要针对修正后的完整列表，语气像朋友，不做疾病诊断。
 """
         val HTTP_CLIENT: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(RecognitionNetworkPolicy.CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)

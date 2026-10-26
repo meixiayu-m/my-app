@@ -14,7 +14,8 @@ data class AppAppearance(
     val theme: AppTheme = AppTheme.MINT,
     val wallpaper: AppWallpaper = AppWallpaper.CREAM,
     val glass: Boolean = false,
-    val customWallpaperUri: String? = null
+    val customWallpaperUri: String? = null,
+    val haptics: Boolean = true
 )
 
 object AppearanceStore {
@@ -23,6 +24,7 @@ object AppearanceStore {
     private const val WALLPAPER = "appearance_wallpaper"
     private const val GLASS = "appearance_glass"
     private const val CUSTOM_WALLPAPER = "appearance_custom_wallpaper"
+    private const val HAPTICS = "appearance_haptics"
 
     fun read(context: Context): AppAppearance {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -32,7 +34,8 @@ object AppearanceStore {
             theme = theme,
             wallpaper = wallpaper,
             glass = prefs.getBoolean(GLASS, false),
-            customWallpaperUri = prefs.getString(CUSTOM_WALLPAPER, null)
+            customWallpaperUri = prefs.getString(CUSTOM_WALLPAPER, null),
+            haptics = prefs.getBoolean(HAPTICS, true)
         )
     }
 
@@ -42,6 +45,7 @@ object AppearanceStore {
             .putString(WALLPAPER, appearance.wallpaper.name)
             .putBoolean(GLASS, appearance.glass)
             .putString(CUSTOM_WALLPAPER, appearance.customWallpaperUri)
+            .putBoolean(HAPTICS, appearance.haptics)
             .apply()
     }
 }
