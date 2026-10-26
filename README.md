@@ -7,12 +7,15 @@
 - 相机拍照或从相册选择图片。
 - 个人模式在 App 设置页填写智谱 API Key，Key 使用 Android Keystore 加密后保存在本机；图片直接发给智谱并返回结构化食物、重量、热量和营养估算。
 - 如果智谱返回 429，App 会等待 2.5 秒自动重试，最多额外重试 2 次。
+- 上传前会把相机/相册图片缩放到最长边 1280px 并压缩为不超过 1 MiB 的 JPEG，减少大图上传超时。
+- 识别请求明确设置连接 15 秒、上传 30 秒、等待/读取 90 秒、单次请求总计 120 秒；错误会标出 DNS、TLS、上传、等待模型或接收响应阶段。
+- 设置页可以用 API Key 刷新智谱模型列表并直接选择模型，也保留手动输入模型 ID。若接口返回上下文 Token、输出上限、限流或请求时间字段，列表会显示；账号剩余 Token、每分钟限流和免费额度通常不由此接口提供，这些以智谱控制台为准。
 - `backend/` 仍保留后端代理模式，适合以后公开发布或多人使用，后端从环境变量读取 API Key。
 - 保存前有确认页，可以修改食物份量；不再返回固定的“米饭 + 清炒时蔬”。
 - Room 本地保存餐食，首页只统计今天的摄入。
 - “饮食日志”按日期统计热量、蛋白质、碳水、脂肪、纤维和餐数。
 - 个人资料支持性别、年龄、身高、体重和运动强度，并计算 BMR/TDEE/每日目标。
-- 已加入薄荷绿/桃粉卡通风 UI、Material 图标和矢量应用图标。
+- 已加入薄荷绿/桃粉卡通风 UI、Material 图标和标准 Android 自适应应用图标。
 - GitHub Actions 可编译并上传 Debug APK。
 
 ## 目录和职责
@@ -25,6 +28,8 @@ app/src/main/java/com/calorielens/app/
 ├── data/CalorieApi.kt              Retrofit 数据模型和后端接口（可选）
 ├── data/ApiKeyStore.kt              Android Keystore 加密保存个人模式 Key
 └── recognition/FoodRecognition.kt  个人模式直连 GLM-4.6V-Flash
+    recognition/RecognitionNetworkPolicy.kt  超时、429 重试和安全错误提示
+    recognition/ZhipuModelCatalog.kt         API Key 对应的模型列表查询
 backend/main.py                     FastAPI + GLM-4.6V-Flash + 餐食接口
 backend/.env.example                后端密钥配置模板
 .github/workflows/android.yml       GitHub Actions 构建和 APK 上传
@@ -100,9 +105,11 @@ Android SDK:  /home/user/toolcache/android-sdk
 4. `sdk.dir` 警告：不要提交本机 `local.properties`；Actions 会自动生成 runner 的 SDK 路径。
 5. `stripDebugDebugSymbols` 警告：通常不是失败原因。
 6. 个人模式识别失败：先检查 App 中 Key 是否保存、手机是否能访问智谱接口和 Key 是否有额度；失败时不会伪造固定菜名，可重试或手动补录。
-7. 用户资料现在会保存在本机设置中，重启 App 后会恢复；清除 App 数据或卸载 App 会清除这些设置。
+7. 用户资料、模型选择和餐食会保存在本机设置/Room 中，重启 App 后会恢复；清除 App 数据或卸载 App 会清除这些设置。安装新 APK 时先直接覆盖安装，不要为了换图标先卸载。
 8. 餐食目前只保存在本机 Room；后端 `/meals` 是独立示例接口，尚未做账号和跨设备同步。
 9. 后端当前是单进程内存存储示例，生产环境要增加数据库、鉴权、限流和 HTTPS。
+10. 如果识别提示“等待模型响应超时”，它表示手机已完成/正在完成连接但在等待智谱返回，不等同于模型名称错误；请记录错误中的阶段和秒数。若提示 DNS、TLS 或上传，则分别检查网络/DNS、系统时间/证书和图片大小。
+11. 小米桌面可能缓存旧的活动图标：先覆盖安装并重启桌面/手机，或只删除桌面上的旧快捷方式后从应用抽屉重新添加；不要清除桌面应用数据，也不要卸载 App，以免丢失本地记录。当前 APK 已同时声明 application/activity 图标、roundIcon、自适应图标和 Android 13+ 单色图标，但仍需在实际机型上确认主题/启动器表现。
 
 ## 交接检查清单
 

@@ -80,6 +80,9 @@ import com.calorielens.app.domain.UserProfile
 import com.calorielens.app.domain.calculateDailyTarget
 import com.calorielens.app.domain.scoreMeal
 import com.calorielens.app.recognition.DirectZhipuFoodRecognizer
+import com.calorielens.app.recognition.ZhipuModelCatalog
+import com.calorielens.app.recognition.ZhipuModelInfo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.io.File
 import java.time.Instant
@@ -127,13 +130,21 @@ private fun CalorieLensApp() {
     val target = calculateDailyTarget(profile)
 
     val recognizeImage: (Uri) -> Unit = { uri ->
-        recognitionError = null
-        recognizing = true
-        scope.launch {
-            runCatching { recognizer.recognize(context, uri) }
-                .onSuccess { pendingItems = it }
-                .onFailure { recognitionError = it.message ?: "识别失败，请检查后端和网络" }
-            recognizing = false
+        if (!recognizing) {
+            recognitionError = null
+            recognizing = true
+            fabExpanded = false
+            scope.launch {
+                try {
+                    pendingItems = recognizer.recognize(context, uri)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    recognitionError = error.message ?: "识别失败，请检查手机网络和智谱设置"
+                } finally {
+                    recognizing = false
+                }
+            }
         }
     }
     val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
@@ -203,7 +214,7 @@ private fun CalorieLensApp() {
             )
         },
         floatingActionButton = {
-            if (pendingItems == null && !showProfile && !showHistory && !showApiKey) {
+            if (pendingItems == null && !showProfile && !showHistory && !showApiKey && !recognizing) {
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (fabExpanded) {
                         SmallFloatingActionButton(onClick = {
@@ -478,8 +489,13 @@ private fun ApiKeyEditor(
     onClear: () -> Unit,
     modifier: Modifier
 ) {
+    val scope = rememberCoroutineScope()
     var key by remember(currentKey) { mutableStateOf(currentKey) }
     var model by remember(currentModel) { mutableStateOf(currentModel) }
+    var modelOptions by remember { mutableStateOf<List<ZhipuModelInfo>>(emptyList()) }
+    var modelMenuOpen by remember { mutableStateOf(false) }
+    var loadingModels by remember { mutableStateOf(false) }
+    var modelError by remember { mutableStateOf<String?>(null) }
     Column(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -488,20 +504,73 @@ private fun ApiKeyEditor(
         Text("个人模式会从本机直接调用 GLM-4.6V-Flash。Key 使用 Android Keystore 加密保存，不会写入项目或 GitHub。", style = MaterialTheme.typography.bodySmall)
         androidx.compose.material3.OutlinedTextField(
             value = key,
-            onValueChange = { key = it },
+            onValueChange = {
+                key = it
+                modelOptions = emptyList()
+                modelError = null
+            },
             label = { Text("智谱 API Key") },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth()
         )
+        Box {
+            OutlinedButton(
+                onClick = { modelMenuOpen = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = modelOptions.isNotEmpty()
+            ) {
+                Text(if (modelOptions.isEmpty()) "模型列表为空（可手动填写）" else "选择模型：$model")
+            }
+            DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
+                modelOptions.forEach { option ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(option.id)
+                                Text(option.limitsLabel(), style = MaterialTheme.typography.labelSmall)
+                            }
+                        },
+                        onClick = {
+                            model = option.id
+                            modelMenuOpen = false
+                        }
+                    )
+                }
+            }
+        }
         androidx.compose.material3.OutlinedTextField(
             value = model,
             onValueChange = { model = it },
             label = { Text("模型名称（接口 ID）") },
-            supportingText = { Text("默认：glm-4.6v-flash；也可填写你账号有权限的其他视觉模型") },
+            supportingText = { Text("可从上方列表选择，也可以手动填写视觉模型 ID") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = {
+                    modelError = null
+                    loadingModels = true
+                    scope.launch {
+                        try {
+                            modelOptions = ZhipuModelCatalog.fetch(key)
+                            if (modelOptions.isEmpty()) modelError = "接口没有返回可用模型，请检查 Key 权限或手动填写模型 ID"
+                        } catch (error: Exception) {
+                            modelError = error.message ?: "模型列表获取失败，请检查网络和 API Key"
+                        } finally {
+                            loadingModels = false
+                        }
+                    }
+                },
+                enabled = key.isNotBlank() && !loadingModels
+            ) {
+                Text(if (loadingModels) "正在获取…" else "刷新模型列表")
+            }
+            if (loadingModels) androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
+        modelError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        Text("模型列表可能只返回模型 ID；每分钟限流、剩余 Token 和免费额度通常不由此接口提供，请以智谱控制台为准。", style = MaterialTheme.typography.bodySmall)
         Button(onClick = { onSave(key, model) }, enabled = key.isNotBlank() && model.isNotBlank()) { Text("保存设置") }
         OutlinedButton(onClick = onClear, enabled = currentKey.isNotBlank()) { Text("清除本机 Key") }
         Text("提示：个人使用可以这样配置，但如果 APK 分享给别人，Key 仍可能被提取。公开版本应改回后端代理模式。", style = MaterialTheme.typography.bodySmall)

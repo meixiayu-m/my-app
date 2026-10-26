@@ -18,8 +18,9 @@ android {
         applicationId = "com.calorielens.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // 每次可安装的新 APK 递增，避免手机把相同版本当成旧安装包并继续使用桌面图标缓存。
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildFeatures { compose = true }
