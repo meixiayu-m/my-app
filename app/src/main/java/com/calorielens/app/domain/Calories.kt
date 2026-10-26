@@ -50,7 +50,15 @@ data class FoodItem(
     }
 }
 
-data class Meal(val id: String, val timestamp: Long, val title: String, val items: List<FoodItem>, val imagePath: String? = null) {
+data class Meal(
+    val id: String,
+    val timestamp: Long,
+    val title: String,
+    val items: List<FoodItem>,
+    val imagePath: String? = null,
+    /** 0 means not rated yet; user rating is independent from the nutrition score. */
+    val rating: Int = 0
+) {
     fun nutrition(): Nutrition = items.map(FoodItem::nutrition).fold(Nutrition(0, 0.0, 0.0, 0.0, 0.0)) { a, b ->
         Nutrition(a.calories + b.calories, a.protein + b.protein, a.fat + b.fat, a.carbs + b.carbs, a.fiber + b.fiber)
     }

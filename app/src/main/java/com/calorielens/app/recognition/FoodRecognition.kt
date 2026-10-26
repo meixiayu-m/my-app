@@ -58,6 +58,8 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
         val payload = JSONObject()
             .put("model", model)
             .put("temperature", 0.1)
+            // 限制回答长度，避免模型输出解释文字拖慢整次请求；解析仍以 JSON 为准。
+            .put("max_tokens", 500)
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", PROMPT))
                 .put(JSONObject()
@@ -251,12 +253,13 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
     private companion object {
         const val API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         const val DEFAULT_MODEL = "glm-4.6v-flash"
-        const val MAX_IMAGE_BYTES = 1024 * 1024
-        const val MAX_IMAGE_DIMENSION = 1280
+        const val MAX_IMAGE_BYTES = 768 * 1024
+        const val MAX_IMAGE_DIMENSION = 1024
         const val MIN_JPEG_QUALITY = 60
         const val PROMPT = """
 你是一个严谨的食物营养估算助手。识别图片中能看见的食物，按独立食物项返回。
-请估算每项可食部分重量（克）和整份对应的热量、蛋白质、脂肪、碳水、膳食纤维。
+请估算每项可食部分重量（克）和整份对应的热量、蛋白质、脂肪、碳水、膳食纤维；零食、水果、饮料和餐后三餐之外的加餐也要单独识别，不要忽略。
+返回的 calories/protein/fat/carbs/fiber 必须是“识别出的这一份”的具体数值，App 会同时换算并展示每 100g 的参考值。
 只能返回 JSON，不要 Markdown，不要解释文字，格式必须是：
 {"items":[{"name":"食物名称","grams":150,"calories":174,"protein":3.9,"fat":0.5,"carbs":38.9,"fiber":0.5,"confidence":0.86}]}
 看不清时可以返回空 items，不要编造固定的菜名；所有数值都必须是非负数字，confidence 在 0 到 1 之间。
