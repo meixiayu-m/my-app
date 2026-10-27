@@ -1,6 +1,9 @@
 package com.calorielens.app
 
 import android.Manifest
+import android.app.Activity
+import android.content.ClipData
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
@@ -39,7 +42,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
@@ -90,10 +92,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -113,22 +113,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.calorielens.app.data.ApiKeyStore
@@ -146,13 +137,20 @@ import com.calorielens.app.domain.Meal
 import com.calorielens.app.domain.Nutrition
 import com.calorielens.app.domain.Sex
 import com.calorielens.app.domain.UserProfile
-import com.calorielens.app.domain.WeeklyStats
 import com.calorielens.app.domain.calculateDailyTarget
 import com.calorielens.app.domain.calculateWeeklyStats
 import com.calorielens.app.domain.scoreMeal
 import com.calorielens.app.recognition.DirectZhipuFoodRecognizer
 import com.calorielens.app.recognition.ZhipuModelCatalog
 import com.calorielens.app.recognition.ZhipuModelInfo
+import com.calorielens.app.ui.components.MealRatingBar
+import com.calorielens.app.ui.components.MealNutritionSummary
+import com.calorielens.app.ui.components.MacroBar
+import com.calorielens.app.ui.components.NutritionRing
+import com.calorielens.app.ui.components.RatingDialog
+import com.calorielens.app.ui.components.WeeklyOverviewCard
+import com.calorielens.app.ui.components.macroTargets
+import com.calorielens.app.ui.theme.CalorieLensTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -170,62 +168,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent { CalorieLensApp() }
     }
-}
-
-@Composable
-private fun CalorieLensTheme(appearance: AppAppearance, content: @Composable () -> Unit) {
-    val dark = appearance.theme == AppTheme.NIGHT
-    val base = if (dark) {
-        androidx.compose.material3.darkColorScheme(
-            primary = Color(0xFFA8D9BD), secondary = Color(0xFFFFB39E), tertiary = Color(0xFFFFD47A),
-            background = Color(0xFF171A18), surface = Color(0xFF202522), surfaceVariant = Color(0xFF303832)
-        )
-    } else {
-        val primary = when (appearance.theme) {
-            AppTheme.PEACH -> Color(0xFFB86D58)
-            AppTheme.LAVENDER -> Color(0xFF7766A8)
-            else -> Color(0xFF5C8D70)
-        }
-        val secondary = when (appearance.theme) {
-            AppTheme.LAVENDER -> Color(0xFFE5A7D0)
-            AppTheme.PEACH -> Color(0xFFE69A83)
-            else -> Color(0xFFE69A83)
-        }
-        lightColorScheme(
-            primary = primary, onPrimary = Color.White, secondary = secondary, tertiary = Color(0xFFF2C66D),
-            background = when (appearance.wallpaper) {
-                AppWallpaper.GREEN -> Color(0xFFF3FAF3)
-                AppWallpaper.PINK -> Color(0xFFFFF5F1)
-                AppWallpaper.BLUE -> Color(0xFFF3F7FB)
-                AppWallpaper.CREAM -> Color(0xFFFFFBF5)
-            },
-            surface = when (appearance.wallpaper) {
-                AppWallpaper.GREEN -> Color(0xFFF7FCF7)
-                AppWallpaper.PINK -> Color(0xFFFFFAF7)
-                AppWallpaper.BLUE -> Color(0xFFF8FBFF)
-                AppWallpaper.CREAM -> Color(0xFFFFFBF5)
-            },
-            surfaceVariant = Color(0xFFF2F4EC)
-        )
-    }
-    val scheme = if (appearance.glass) base.copy(
-        surface = base.surface.copy(alpha = if (dark) 0.84f else 0.76f),
-        surfaceVariant = base.surfaceVariant.copy(alpha = if (dark) 0.78f else 0.70f)
-    ) else base
-    val view = LocalView.current
-    val activity = view.context as? android.app.Activity
-    SideEffect {
-        activity?.window?.let { window ->
-            WindowCompat.setDecorFitsSystemWindows(window, true)
-            window.statusBarColor = scheme.background.toArgb()
-            window.navigationBarColor = scheme.background.toArgb()
-            WindowInsetsControllerCompat(window, view).apply {
-                isAppearanceLightStatusBars = !dark
-                isAppearanceLightNavigationBars = !dark
-            }
-        }
-    }
-    MaterialTheme(colorScheme = scheme, content = content)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -321,6 +263,9 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     var pendingItems by remember { mutableStateOf<List<FoodItem>?>(null) }
     var pendingComment by remember { mutableStateOf("") }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
+    var cropCandidateUri by remember { mutableStateOf<Uri?>(null) }
+    var cropLaunchSource by remember { mutableStateOf<Uri?>(null) }
+    var cropOutputUri by remember { mutableStateOf<Uri?>(null) }
     var refining by remember { mutableStateOf(false) }
     var refinementError by remember { mutableStateOf<String?>(null) }
     var recognitionStage by remember { mutableStateOf("正在准备照片…") }
@@ -368,10 +313,47 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
             }
         }
     }
+    val cropLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val output = cropOutputUri
+        cropLaunchSource = null
+        cropOutputUri = null
+        val wroteOutput = output != null && runCatching {
+            context.contentResolver.openAssetFileDescriptor(output, "r")?.use { it.length > 0 } == true
+        }.getOrDefault(false)
+        if ((result.resultCode == Activity.RESULT_OK || wroteOutput) && output != null) {
+            recognizeImage(output)
+        }
+    }
+    val launchCrop: (Uri) -> Unit = { source ->
+        runCatching {
+            val outputFile = File.createTempFile("crop_", ".jpg", File(context.cacheDir, "images").apply { mkdirs() })
+            val output = FileProvider.getUriForFile(context, "com.calorielens.app.fileprovider", outputFile)
+            cropLaunchSource = source
+            cropOutputUri = output
+            val intent = Intent("com.android.camera.action.CROP").apply {
+                setDataAndType(source, "image/*")
+                clipData = ClipData.newRawUri("source", source)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                putExtra("crop", "true")
+                putExtra("aspectX", 4)
+                putExtra("aspectY", 3)
+                putExtra("scale", true)
+                putExtra("return-data", false)
+                putExtra("output", output)
+                putExtra(android.provider.MediaStore.EXTRA_OUTPUT, output)
+            }
+            cropLauncher.launch(intent)
+        }.onFailure {
+            cropLaunchSource?.let(recognizeImage)
+            cropLaunchSource = null
+            cropOutputUri = null
+            scope.launch { snackbarHostState.showSnackbar("此手机不支持系统裁剪，已使用原图识别") }
+        }
+    }
     val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         val uri = pendingUri
         pendingUri = null
-        if (success && uri != null) recognizeImage(uri)
+        if (success && uri != null) cropCandidateUri = uri
     }
     val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
@@ -385,7 +367,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
         }
     }
     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) recognizeImage(uri)
+        if (uri != null) cropCandidateUri = uri
     }
     val backupExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
@@ -438,6 +420,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
         showManualMeal = false
         editingMeal = null
         editingComment = ""
+        cropCandidateUri = null
     }
     Scaffold(
         containerColor = if (appearance.customWallpaperUri != null || appearance.glass) Color.Transparent else MaterialTheme.colorScheme.background,
@@ -677,6 +660,25 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
             )
         }
     }
+    cropCandidateUri?.let { source ->
+        AlertDialog(
+            onDismissRequest = { cropCandidateUri = null },
+            title = { Text("先裁一下再识别吗？") },
+            text = { Text("裁掉桌面和无关背景通常能提高识别速度与准确率；也可以直接使用原图。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    cropCandidateUri = null
+                    launchCrop(source)
+                }) { Text("裁剪照片") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    cropCandidateUri = null
+                    recognizeImage(source)
+                }) { Text("直接识别") }
+            }
+        )
+    }
     ratingTarget?.let { meal ->
         RatingDialog(
             meal = meal,
@@ -913,93 +915,6 @@ private fun LocalUriImage(uri: Uri, modifier: Modifier, alpha: Float = 1f) {
 }
 
 @Composable
-private fun MealNutritionSummary(nutrition: Nutrition, target: com.calorielens.app.domain.DailyTarget) {
-    val targets = macroTargets(target.targetCalories)
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            NutritionRing(
-                value = nutrition.calories.toFloat(),
-                target = target.targetCalories.toFloat(),
-                label = "本餐热量",
-                center = "${nutrition.calories}",
-                unit = "kcal",
-                modifier = Modifier.size(128.dp),
-                strokeWidth = 11.dp
-            )
-            Spacer(Modifier.width(18.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                Text("占今日目标", fontWeight = FontWeight.Bold)
-                MacroBar("蛋白质", nutrition.protein, targets.protein, MaterialTheme.colorScheme.primary)
-                MacroBar("碳水", nutrition.carbs, targets.carbs, MaterialTheme.colorScheme.secondary)
-                MacroBar("脂肪", nutrition.fat, targets.fat, Color(0xFFE1B64B))
-            }
-        }
-    }
-}
-
-@Composable
-private fun MacroBar(label: String, value: Double, target: Double, color: Color) {
-    val progress by animateFloatAsState(
-        targetValue = (value / target.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f),
-        animationSpec = tween(700, easing = FastOutSlowInEasing),
-        label = "$label-progress"
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row {
-            Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-            Text("${value.toInt()}g · ${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, color = color)
-        }
-        Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(color.copy(alpha = 0.14f))) {
-            Box(Modifier.fillMaxWidth(progress).height(6.dp).clip(CircleShape).background(color))
-        }
-    }
-}
-
-@Composable
-private fun NutritionRing(
-    value: Float,
-    target: Float,
-    label: String,
-    center: String,
-    unit: String,
-    modifier: Modifier,
-    strokeWidth: androidx.compose.ui.unit.Dp
-) {
-    val progress = (value / target.coerceAtLeast(1f)).coerceIn(0f, 1f)
-    val animated = remember { Animatable(0f) }
-    val trackColor = MaterialTheme.colorScheme.surfaceVariant
-    val progressColor = MaterialTheme.colorScheme.primary
-    LaunchedEffect(progress) { animated.animateTo(progress, tween(850, easing = FastOutSlowInEasing)) }
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            drawArc(
-                color = trackColor,
-                startAngle = -90f,
-                sweepAngle = 360f,
-                useCenter = false,
-                style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
-            )
-            drawArc(
-                color = progressColor,
-                startAngle = -90f,
-                sweepAngle = 360f * animated.value,
-                useCenter = false,
-                style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
-            )
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(center, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(unit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
 private fun AiMealComment(comment: String) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
@@ -1098,14 +1013,6 @@ private fun EditableFoodCard(item: FoodItem, expandedByDefault: Boolean, haptics
     }
 }
 
-private data class MacroTargets(val protein: Double, val carbs: Double, val fat: Double)
-
-private fun macroTargets(calories: Int): MacroTargets = MacroTargets(
-    protein = calories * 0.20 / 4.0,
-    carbs = calories * 0.50 / 4.0,
-    fat = calories * 0.30 / 9.0
-)
-
 private fun localMealRemark(nutrition: Nutrition, target: com.calorielens.app.domain.DailyTarget): String {
     val ratio = nutrition.calories.toDouble() / target.targetCalories.coerceAtLeast(1)
     return when {
@@ -1114,230 +1021,6 @@ private fun localMealRemark(nutrition: Nutrition, target: com.calorielens.app.do
         nutrition.fiber < 4 -> "主食和蛋白质都有了，再添点蔬菜会更均衡。"
         else -> "搭配看起来不错，记得这只是根据图片做出的粗略估算。"
     }
-}
-
-@Composable
-private fun MealRatingBar(
-    rating: Int,
-    onRatingChanged: (Int) -> Unit,
-    hapticsEnabled: Boolean,
-    modifier: Modifier = Modifier,
-    showTitle: Boolean = true
-) {
-    val haptic = LocalHapticFeedback.current
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        if (showTitle) Text("这顿饭好吃吗？", fontWeight = FontWeight.SemiBold)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            repeat(5) { index ->
-                val selected = index < rating
-                RatingStar(
-                    index = index,
-                    selected = selected,
-                    onClick = {
-                        if (hapticsEnabled) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        }
-                        onRatingChanged(index + 1)
-                    }
-                )
-            }
-        }
-        androidx.compose.animation.AnimatedVisibility(
-            visible = rating > 0,
-            enter = fadeIn(tween(180)) + slideInVertically { it / 3 } + scaleIn(initialScale = 0.9f),
-            exit = fadeOut(tween(120))
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = Color(0xFFF2B544).copy(alpha = 0.15f),
-                modifier = Modifier.padding(top = 9.dp)
-            ) {
-                Text(
-                    "$rating 星 · ${ratingLabel(rating)}",
-                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color(0xFF9B6A0A),
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-        if (rating == 0) {
-            Text("点一颗星，给这次记录留个味道", modifier = Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-@Composable
-private fun RatingStar(index: Int, selected: Boolean, onClick: () -> Unit) {
-    val bounce = remember { Animatable(1f) }
-    val glow by animateFloatAsState(
-        targetValue = if (selected) 1f else 0f,
-        animationSpec = tween(220),
-        label = "star-glow"
-    )
-    LaunchedEffect(selected) {
-        if (selected) {
-            bounce.snapTo(0.72f)
-            bounce.animateTo(1.18f, spring(dampingRatio = 0.42f, stiffness = 620f))
-            bounce.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = 500f))
-        }
-    }
-    val gold = Color(0xFFF2B544)
-    val empty = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-    Box(
-        Modifier.size(47.dp)
-            .graphicsLayer {
-                scaleX = bounce.value
-                scaleY = bounce.value
-            }
-            .clip(CircleShape)
-            .semantics {
-                contentDescription = "评分 ${index + 1} 星"
-                this.selected = selected
-            }
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(Modifier.fillMaxSize()) {
-            if (glow > 0f) {
-                drawCircle(gold.copy(alpha = glow * 0.14f), radius = size.minDimension * 0.46f)
-                drawCircle(gold.copy(alpha = glow * 0.10f), radius = size.minDimension * 0.38f)
-            }
-            val centerPoint = center
-            val outer = size.minDimension * 0.35f
-            val inner = outer * 0.46f
-            val star = Path().apply {
-                repeat(10) { point ->
-                    val radius = if (point % 2 == 0) outer else inner
-                    val angle = Math.toRadians(-90.0 + point * 36.0)
-                    val px = centerPoint.x + kotlin.math.cos(angle).toFloat() * radius
-                    val py = centerPoint.y + kotlin.math.sin(angle).toFloat() * radius
-                    if (point == 0) moveTo(px, py) else lineTo(px, py)
-                }
-                close()
-            }
-            drawPath(star, if (selected) gold else empty, style = androidx.compose.ui.graphics.drawscope.Fill)
-            if (!selected) {
-                drawPath(star, empty, style = Stroke(width = 1.4.dp.toPx()))
-            }
-        }
-    }
-}
-
-@Composable
-private fun RatingDialog(meal: Meal, hapticsEnabled: Boolean, onRate: (Int) -> Unit, onSkip: () -> Unit) {
-    var rating by remember(meal.id) { mutableStateOf(0) }
-    var submitted by remember(meal.id) { mutableStateOf(false) }
-    val haptic = LocalHapticFeedback.current
-    LaunchedEffect(submitted) {
-        if (submitted) {
-            delay(680)
-            onRate(rating)
-        }
-    }
-    Dialog(
-        onDismissRequest = onSkip,
-        properties = DialogProperties(dismissOnBackPress = !submitted, dismissOnClickOutside = !submitted)
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
-            shape = RoundedCornerShape(30.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 18.dp
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    Modifier.fillMaxWidth().height(132.dp)
-                        .background(Brush.linearGradient(listOf(Color(0xFFFFE3A8), Color(0xFFFFB59E))))
-                ) {
-                    Canvas(Modifier.fillMaxSize()) {
-                        repeat(8) { index ->
-                            val px = size.width * (0.08f + index * 0.12f)
-                            val py = size.height * (if (index % 2 == 0) 0.2f else 0.34f)
-                            drawCircle(Color.White.copy(alpha = 0.24f), radius = (2 + index % 3).dp.toPx(), center = androidx.compose.ui.geometry.Offset(px, py))
-                        }
-                    }
-                    Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("✨", style = MaterialTheme.typography.headlineMedium)
-                        Text("这餐，合胃口吗？", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color(0xFF583813))
-                        Text("${meal.title} 已记进今天的小账本", style = MaterialTheme.typography.bodySmall, color = Color(0xFF6F4D2D))
-                    }
-                }
-                AnimatedVisibility(visible = !submitted, enter = fadeIn(), exit = fadeOut()) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        MealRatingBar(
-                            rating = rating,
-                            onRatingChanged = { rating = it },
-                            hapticsEnabled = hapticsEnabled,
-                            showTitle = false
-                        )
-                        Text(
-                            ratingMessage(rating),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                            TextButton(onClick = onSkip, modifier = Modifier.weight(0.42f)) { Text("稍后再评") }
-                            Button(
-                                onClick = {
-                                    if (rating == 0) {
-                                        onSkip()
-                                    } else {
-                                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        submitted = true
-                                    }
-                                },
-                                modifier = Modifier.weight(0.58f),
-                                shape = RoundedCornerShape(16.dp)
-                            ) { Text(if (rating == 0) "跳过" else "收下这顿饭的评分") }
-                        }
-                    }
-                }
-                AnimatedVisibility(
-                    visible = submitted,
-                    enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.88f),
-                    exit = fadeOut()
-                ) {
-                    Column(
-                        Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)) {
-                            Icon(Icons.Default.Favorite, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(13.dp))
-                        }
-                        Text("谢谢你的口味反馈", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("$rating 星 · ${ratingLabel(rating)}，已经记下啦", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun ratingLabel(rating: Int): String = when (rating) {
-    1 -> "不太合口味"
-    2 -> "一般"
-    3 -> "还不错"
-    4 -> "很好吃"
-    5 -> "超好吃"
-    else -> "暂未评价"
-}
-
-private fun ratingMessage(rating: Int): String = when (rating) {
-    1 -> "没关系，记录下来才知道什么更适合自己"
-    2 -> "填饱肚子也很重要，下一餐换个口味吧"
-    3 -> "稳稳的一餐，普通日子也有好好吃饭"
-    4 -> "看起来很满足，这一餐值得记住"
-    5 -> "今天的快乐有这一餐一份！"
-    else -> "喜欢的话轻轻点一颗星"
 }
 
 private val MEAL_TYPES = listOf("早餐", "午餐", "晚餐", "下午茶", "夜宵", "加餐", "其他")
@@ -1808,6 +1491,7 @@ private fun HistoryScreen(
     val haptic = LocalHapticFeedback.current
     var month by remember { mutableStateOf(YearMonth.now()) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
+    var copyCandidate by remember { mutableStateOf<Meal?>(null) }
     val selectedMealsFlow = remember(selectedDate) { store.mealsForDate(selectedDate) }
     val selectedMeals by selectedMealsFlow.collectAsState(initial = emptyList())
     val byDate = summaries.associateBy { it.localDate }
@@ -1893,72 +1577,26 @@ private fun HistoryScreen(
                     meal = meal,
                     target = target,
                     onEdit = { onEdit(meal) },
-                    onCopy = { onCopy(meal) },
+                    onCopy = if (selectedDate == LocalDate.now()) null else ({ copyCandidate = meal }),
                     onDelete = null
                 )
             }
         }
         Spacer(Modifier.height(32.dp))
     }
-}
-
-@Composable
-private fun WeeklyOverviewCard(stats: WeeklyStats, summaries: List<DailySummary>, fallbackTarget: Int) {
-    val today = LocalDate.now()
-    val week = (6 downTo 0).map { offset -> today.minusDays(offset.toLong()) }
-    val byDate = summaries.associateBy { it.localDate }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("近 7 天", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(if (stats.daysTracked == 0) "记录几餐后，这里会出现你的节奏" else "不是追完美，是看看自己的节奏", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
-                    Text("${stats.daysTracked}/7 天记录", modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth().height(82.dp)) {
-                week.forEach { date ->
-                    val summary = byDate[date]
-                    val dayTarget = summary?.targetCalories?.takeIf { it > 0 } ?: fallbackTarget
-                    val ratio = (summary?.calories?.toFloat()?.div(dayTarget.coerceAtLeast(1)) ?: 0f).coerceIn(0.08f, 1f)
-                    val color = when (summary?.let { it.calories > dayTarget }) {
-                        true -> Color(0xFFD46858)
-                        false -> Color(0xFF4F9A68)
-                        null -> MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                    }
-                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-                        Box(
-                            Modifier.fillMaxWidth().fillMaxHeight(ratio).clip(RoundedCornerShape(8.dp)).background(color.copy(alpha = 0.72f))
-                        )
-                        Spacer(Modifier.height(5.dp))
-                        Text("${date.dayOfWeek.value}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                WeeklyMetric("日均热量", if (stats.daysTracked == 0) "—" else "${stats.averageCalories}", "kcal", Modifier.weight(1f))
-                WeeklyMetric("目标内", "${stats.targetHitRate}%", "${stats.daysWithinTarget} 天", Modifier.weight(1f))
-                WeeklyMetric("日均蛋白", if (stats.daysTracked == 0) "—" else "${stats.averageProtein}", "g · ${stats.totalMeals} 餐", Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun WeeklyMetric(label: String, value: String, note: String, modifier: Modifier) {
-    Column(
-        modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f)).padding(10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text(note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+    copyCandidate?.let { meal ->
+        AlertDialog(
+            onDismissRequest = { copyCandidate = null },
+            title = { Text("复制到今天的哪一餐？") },
+            text = { Text("会新增一条「${meal.title}」，原记录不会改变。如果你只是想查看或修改历史，请选择编辑。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    copyCandidate = null
+                    onCopy(meal)
+                }) { Text("新增到「${meal.title}」") }
+            },
+            dismissButton = { TextButton(onClick = { copyCandidate = null }) { Text("取消") } }
+        )
     }
 }
 
