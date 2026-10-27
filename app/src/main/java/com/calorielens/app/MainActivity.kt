@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
@@ -46,6 +47,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
@@ -54,6 +56,7 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiFoodBeverage
@@ -79,6 +82,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -112,10 +117,15 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -136,7 +146,9 @@ import com.calorielens.app.domain.Meal
 import com.calorielens.app.domain.Nutrition
 import com.calorielens.app.domain.Sex
 import com.calorielens.app.domain.UserProfile
+import com.calorielens.app.domain.WeeklyStats
 import com.calorielens.app.domain.calculateDailyTarget
+import com.calorielens.app.domain.calculateWeeklyStats
 import com.calorielens.app.domain.scoreMeal
 import com.calorielens.app.recognition.DirectZhipuFoodRecognizer
 import com.calorielens.app.recognition.ZhipuModelCatalog
@@ -287,10 +299,12 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val store = remember { PersistentMealStore(context) }
+    val snackbarHostState = remember { SnackbarHostState() }
     var todayDate by remember { mutableStateOf(LocalDate.now()) }
     val todayMealsFlow = remember(todayDate) { store.mealsForDate(todayDate) }
     val todayMeals by todayMealsFlow.collectAsState(initial = emptyList())
     val dailySummaries by store.dailySummaries.collectAsState(initial = emptyList())
+    val recentFoods by store.recentFoods.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     val recognizer = remember { DirectZhipuFoodRecognizer() }
     var recognizing by remember { mutableStateOf(false) }
@@ -427,6 +441,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     }
     Scaffold(
         containerColor = if (appearance.customWallpaperUri != null || appearance.glass) Color.Transparent else MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 navigationIcon = {
@@ -592,6 +607,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                 )
             }
             showManualMeal -> ManualMealEditor(
+                recentFoods = recentFoods,
                 onCancel = { showManualMeal = false },
                 onSave = { items, title ->
                     scope.launch {
@@ -616,6 +632,12 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                 target = target,
                 hapticsEnabled = appearance.haptics,
                 onEdit = { editingMeal = it; showHistory = false },
+                onCopy = { meal ->
+                    scope.launch {
+                        store.copyMealToToday(meal, target.targetCalories)
+                        snackbarHostState.showSnackbar("已复制「${meal.title}」到今天")
+                    }
+                },
                 modifier = Modifier.padding(padding)
             )
             showApiKey -> ApiKeyEditor(
@@ -999,6 +1021,7 @@ private fun AiMealComment(comment: String) {
 private fun EditableFoodCard(item: FoodItem, expandedByDefault: Boolean, hapticsEnabled: Boolean, onChanged: (FoodItem) -> Unit) {
     val haptic = LocalHapticFeedback.current
     var expanded by remember(item.id) { mutableStateOf(expandedByDefault) }
+    var portionMenuOpen by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
         shape = RoundedCornerShape(22.dp),
@@ -1033,6 +1056,27 @@ private fun EditableFoodCard(item: FoodItem, expandedByDefault: Boolean, haptics
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp)
                     )
+                    Box {
+                        OutlinedButton(
+                            onClick = {
+                                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                portionMenuOpen = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp)
+                        ) { Text("常用份量：一小份 / 半碗 / 一份 / 一大份") }
+                        DropdownMenu(expanded = portionMenuOpen, onDismissRequest = { portionMenuOpen = false }) {
+                            PORTION_PRESETS.forEach { preset ->
+                                DropdownMenuItem(
+                                    text = { Text("${preset.label} · ${preset.grams.toInt()}g") },
+                                    onClick = {
+                                        onChanged(item.copy(grams = preset.grams))
+                                        portionMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
                     androidx.compose.material3.OutlinedTextField(
                         value = item.grams.toInt().toString(),
                         onValueChange = { value ->
@@ -1077,33 +1121,108 @@ private fun MealRatingBar(
     rating: Int,
     onRatingChanged: (Int) -> Unit,
     hapticsEnabled: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showTitle: Boolean = true
 ) {
     val haptic = LocalHapticFeedback.current
-    Column(modifier) {
-        Text("这顿饭好吃吗？", fontWeight = FontWeight.SemiBold)
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        if (showTitle) Text("这顿饭好吃吗？", fontWeight = FontWeight.SemiBold)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
             repeat(5) { index ->
                 val selected = index < rating
-                val scale by animateFloatAsState(
-                    targetValue = if (selected) 1.14f else 1f,
-                    animationSpec = spring(dampingRatio = 0.45f, stiffness = 520f),
-                    label = "rating-star"
-                )
-                Text(
-                    text = if (selected) "★" else "☆",
-                    color = if (selected) Color(0xFFF2B544) else MaterialTheme.colorScheme.outline,
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier
-                        .graphicsLayer { scaleX = scale; scaleY = scale }
-                        .clickable {
-                            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onRatingChanged(index + 1)
+                RatingStar(
+                    index = index,
+                    selected = selected,
+                    onClick = {
+                        if (hapticsEnabled) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         }
-                        .padding(end = 3.dp)
+                        onRatingChanged(index + 1)
+                    }
                 )
             }
-            Text(if (rating == 0) "暂不评价" else "$rating/5 · ${ratingLabel(rating)}", style = MaterialTheme.typography.bodySmall)
+        }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = rating > 0,
+            enter = fadeIn(tween(180)) + slideInVertically { it / 3 } + scaleIn(initialScale = 0.9f),
+            exit = fadeOut(tween(120))
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = Color(0xFFF2B544).copy(alpha = 0.15f),
+                modifier = Modifier.padding(top = 9.dp)
+            ) {
+                Text(
+                    "$rating 星 · ${ratingLabel(rating)}",
+                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFF9B6A0A),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+        if (rating == 0) {
+            Text("点一颗星，给这次记录留个味道", modifier = Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun RatingStar(index: Int, selected: Boolean, onClick: () -> Unit) {
+    val bounce = remember { Animatable(1f) }
+    val glow by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = tween(220),
+        label = "star-glow"
+    )
+    LaunchedEffect(selected) {
+        if (selected) {
+            bounce.snapTo(0.72f)
+            bounce.animateTo(1.18f, spring(dampingRatio = 0.42f, stiffness = 620f))
+            bounce.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = 500f))
+        }
+    }
+    val gold = Color(0xFFF2B544)
+    val empty = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+    Box(
+        Modifier.size(47.dp)
+            .graphicsLayer {
+                scaleX = bounce.value
+                scaleY = bounce.value
+            }
+            .clip(CircleShape)
+            .semantics {
+                contentDescription = "评分 ${index + 1} 星"
+                this.selected = selected
+            }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            if (glow > 0f) {
+                drawCircle(gold.copy(alpha = glow * 0.14f), radius = size.minDimension * 0.46f)
+                drawCircle(gold.copy(alpha = glow * 0.10f), radius = size.minDimension * 0.38f)
+            }
+            val centerPoint = center
+            val outer = size.minDimension * 0.35f
+            val inner = outer * 0.46f
+            val star = Path().apply {
+                repeat(10) { point ->
+                    val radius = if (point % 2 == 0) outer else inner
+                    val angle = Math.toRadians(-90.0 + point * 36.0)
+                    val px = centerPoint.x + kotlin.math.cos(angle).toFloat() * radius
+                    val py = centerPoint.y + kotlin.math.sin(angle).toFloat() * radius
+                    if (point == 0) moveTo(px, py) else lineTo(px, py)
+                }
+                close()
+            }
+            drawPath(star, if (selected) gold else empty, style = androidx.compose.ui.graphics.drawscope.Fill)
+            if (!selected) {
+                drawPath(star, empty, style = Stroke(width = 1.4.dp.toPx()))
+            }
         }
     }
 }
@@ -1111,20 +1230,96 @@ private fun MealRatingBar(
 @Composable
 private fun RatingDialog(meal: Meal, hapticsEnabled: Boolean, onRate: (Int) -> Unit, onSkip: () -> Unit) {
     var rating by remember(meal.id) { mutableStateOf(0) }
-    AlertDialog(
+    var submitted by remember(meal.id) { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
+    LaunchedEffect(submitted) {
+        if (submitted) {
+            delay(680)
+            onRate(rating)
+        }
+    }
+    Dialog(
         onDismissRequest = onSkip,
-        title = { Text("这顿饭好吃吗？") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${meal.title} 已保存，可以给这顿饭一个口味评分。")
-                MealRatingBar(rating = rating, onRatingChanged = { rating = it }, hapticsEnabled = hapticsEnabled)
+        properties = DialogProperties(dismissOnBackPress = !submitted, dismissOnClickOutside = !submitted)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
+            shape = RoundedCornerShape(30.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 18.dp
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier.fillMaxWidth().height(132.dp)
+                        .background(Brush.linearGradient(listOf(Color(0xFFFFE3A8), Color(0xFFFFB59E))))
+                ) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        repeat(8) { index ->
+                            val px = size.width * (0.08f + index * 0.12f)
+                            val py = size.height * (if (index % 2 == 0) 0.2f else 0.34f)
+                            drawCircle(Color.White.copy(alpha = 0.24f), radius = (2 + index % 3).dp.toPx(), center = androidx.compose.ui.geometry.Offset(px, py))
+                        }
+                    }
+                    Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("✨", style = MaterialTheme.typography.headlineMedium)
+                        Text("这餐，合胃口吗？", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color(0xFF583813))
+                        Text("${meal.title} 已记进今天的小账本", style = MaterialTheme.typography.bodySmall, color = Color(0xFF6F4D2D))
+                    }
+                }
+                AnimatedVisibility(visible = !submitted, enter = fadeIn(), exit = fadeOut()) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        MealRatingBar(
+                            rating = rating,
+                            onRatingChanged = { rating = it },
+                            hapticsEnabled = hapticsEnabled,
+                            showTitle = false
+                        )
+                        Text(
+                            ratingMessage(rating),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            TextButton(onClick = onSkip, modifier = Modifier.weight(0.42f)) { Text("稍后再评") }
+                            Button(
+                                onClick = {
+                                    if (rating == 0) {
+                                        onSkip()
+                                    } else {
+                                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        submitted = true
+                                    }
+                                },
+                                modifier = Modifier.weight(0.58f),
+                                shape = RoundedCornerShape(16.dp)
+                            ) { Text(if (rating == 0) "跳过" else "收下这顿饭的评分") }
+                        }
+                    }
+                }
+                AnimatedVisibility(
+                    visible = submitted,
+                    enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.88f),
+                    exit = fadeOut()
+                ) {
+                    Column(
+                        Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)) {
+                            Icon(Icons.Default.Favorite, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(13.dp))
+                        }
+                        Text("谢谢你的口味反馈", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("$rating 星 · ${ratingLabel(rating)}，已经记下啦", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { if (rating > 0) onRate(rating) else onSkip() }) { Text(if (rating > 0) "保存评分" else "跳过") }
-        },
-        dismissButton = { TextButton(onClick = onSkip) { Text("稍后再评") } }
-    )
+        }
+    }
 }
 
 private fun ratingLabel(rating: Int): String = when (rating) {
@@ -1132,10 +1327,28 @@ private fun ratingLabel(rating: Int): String = when (rating) {
     2 -> "一般"
     3 -> "还不错"
     4 -> "很好吃"
-    else -> "超好吃"
+    5 -> "超好吃"
+    else -> "暂未评价"
+}
+
+private fun ratingMessage(rating: Int): String = when (rating) {
+    1 -> "没关系，记录下来才知道什么更适合自己"
+    2 -> "填饱肚子也很重要，下一餐换个口味吧"
+    3 -> "稳稳的一餐，普通日子也有好好吃饭"
+    4 -> "看起来很满足，这一餐值得记住"
+    5 -> "今天的快乐有这一餐一份！"
+    else -> "喜欢的话轻轻点一颗星"
 }
 
 private val MEAL_TYPES = listOf("早餐", "午餐", "晚餐", "下午茶", "夜宵", "加餐", "其他")
+private data class PortionPreset(val label: String, val grams: Double)
+private val PORTION_PRESETS = listOf(
+    PortionPreset("一小份", 60.0),
+    PortionPreset("半碗", 100.0),
+    PortionPreset("一份", 150.0),
+    PortionPreset("一大份", 220.0),
+    PortionPreset("一杯", 250.0)
+)
 private val RECOGNITION_WAIT_LINES = listOf(
     "正在仔细看看这盘菜是什么…",
     "让我猜猜这顿吃了多少卡路里 🔍",
@@ -1156,6 +1369,7 @@ private fun defaultMealTitle(time: LocalTime = LocalTime.now()): String = when {
 
 @Composable
 private fun ManualMealEditor(
+    recentFoods: List<FoodItem>,
     onCancel: () -> Unit,
     onSave: (List<FoodItem>, String) -> Unit,
     modifier: Modifier
@@ -1168,6 +1382,7 @@ private fun ManualMealEditor(
     var carbs by remember { mutableStateOf("0") }
     var title by remember { mutableStateOf("下午茶") }
     var menuOpen by remember { mutableStateOf(false) }
+    var portionMenuOpen by remember { mutableStateOf(false) }
     val valid = name.isNotBlank() && (grams.toDoubleOrNull() ?: 0.0) > 0 && (calories.toDoubleOrNull() ?: -1.0) >= 0
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("手动添加餐食", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -1178,8 +1393,44 @@ private fun ManualMealEditor(
                 MEAL_TYPES.forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { title = option; menuOpen = false }) }
             }
         }
+        if (recentFoods.isNotEmpty()) {
+            Text("最近吃过", fontWeight = FontWeight.SemiBold)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(recentFoods, key = { it.id }) { food ->
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.11f),
+                        modifier = Modifier.clickable {
+                            name = food.name
+                            grams = food.grams.toInt().toString()
+                            calories = food.caloriesPer100g.toInt().toString()
+                            protein = food.proteinPer100g.toString()
+                            fat = food.fatPer100g.toString()
+                            carbs = food.carbsPer100g.toString()
+                        }
+                    ) {
+                        Text(
+                            "${food.name} · ${food.grams.toInt()}g",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+            }
+        }
         androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("食物名称") }, modifier = Modifier.fillMaxWidth())
         androidx.compose.material3.OutlinedTextField(grams, { grams = it }, label = { Text("份量（克）") }, modifier = Modifier.fillMaxWidth())
+        Box {
+            OutlinedButton(onClick = { portionMenuOpen = true }, modifier = Modifier.fillMaxWidth()) { Text("填入常用份量") }
+            DropdownMenu(expanded = portionMenuOpen, onDismissRequest = { portionMenuOpen = false }) {
+                PORTION_PRESETS.forEach { preset ->
+                    DropdownMenuItem(
+                        text = { Text("${preset.label} · ${preset.grams.toInt()}g") },
+                        onClick = { grams = preset.grams.toInt().toString(); portionMenuOpen = false }
+                    )
+                }
+            }
+        }
         androidx.compose.material3.OutlinedTextField(calories, { calories = it }, label = { Text("热量（每 100 克 kcal）") }, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             androidx.compose.material3.OutlinedTextField(protein, { protein = it }, label = { Text("蛋白质 g") }, modifier = Modifier.weight(1f))
@@ -1296,6 +1547,7 @@ private fun HomeScreen(
                 meal = meal,
                 target = target,
                 onEdit = { onEdit(meal) },
+                onCopy = null,
                 onDelete = {
                     if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     deleteCandidate = meal
@@ -1550,6 +1802,7 @@ private fun HistoryScreen(
     target: com.calorielens.app.domain.DailyTarget,
     hapticsEnabled: Boolean,
     onEdit: (Meal) -> Unit,
+    onCopy: (Meal) -> Unit,
     modifier: Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -1573,6 +1826,11 @@ private fun HistoryScreen(
         Spacer(Modifier.height(8.dp))
         Text("饮食日历", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text("每天只看一眼热量和是否超标；近 30 天仍可查看并编辑餐食。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        WeeklyOverviewCard(
+            stats = calculateWeeklyStats(summaries, LocalDate.now()),
+            summaries = summaries,
+            fallbackTarget = target.targetCalories
+        )
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(28.dp),
@@ -1631,10 +1889,76 @@ private fun HistoryScreen(
             )
         } else {
             selectedMeals.sortedByDescending { it.timestamp }.forEach { meal ->
-                MealCard(meal, target, onEdit = { onEdit(meal) }, onDelete = null)
+                MealCard(
+                    meal = meal,
+                    target = target,
+                    onEdit = { onEdit(meal) },
+                    onCopy = { onCopy(meal) },
+                    onDelete = null
+                )
             }
         }
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun WeeklyOverviewCard(stats: WeeklyStats, summaries: List<DailySummary>, fallbackTarget: Int) {
+    val today = LocalDate.now()
+    val week = (6 downTo 0).map { offset -> today.minusDays(offset.toLong()) }
+    val byDate = summaries.associateBy { it.localDate }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("近 7 天", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(if (stats.daysTracked == 0) "记录几餐后，这里会出现你的节奏" else "不是追完美，是看看自己的节奏", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
+                    Text("${stats.daysTracked}/7 天记录", modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth().height(82.dp)) {
+                week.forEach { date ->
+                    val summary = byDate[date]
+                    val dayTarget = summary?.targetCalories?.takeIf { it > 0 } ?: fallbackTarget
+                    val ratio = (summary?.calories?.toFloat()?.div(dayTarget.coerceAtLeast(1)) ?: 0f).coerceIn(0.08f, 1f)
+                    val color = when (summary?.let { it.calories > dayTarget }) {
+                        true -> Color(0xFFD46858)
+                        false -> Color(0xFF4F9A68)
+                        null -> MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                    }
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
+                        Box(
+                            Modifier.fillMaxWidth().fillMaxHeight(ratio).clip(RoundedCornerShape(8.dp)).background(color.copy(alpha = 0.72f))
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        Text("${date.dayOfWeek.value}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                WeeklyMetric("日均热量", if (stats.daysTracked == 0) "—" else "${stats.averageCalories}", "kcal", Modifier.weight(1f))
+                WeeklyMetric("目标内", "${stats.targetHitRate}%", "${stats.daysWithinTarget} 天", Modifier.weight(1f))
+                WeeklyMetric("日均蛋白", if (stats.daysTracked == 0) "—" else "${stats.averageProtein}", "g · ${stats.totalMeals} 餐", Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeeklyMetric(label: String, value: String, note: String, modifier: Modifier) {
+    Column(
+        modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f)).padding(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     }
 }
 
@@ -1671,7 +1995,7 @@ private fun CalendarDayCell(
         Text("${date.dayOfMonth}", fontWeight = if (date == LocalDate.now()) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.labelLarge)
         if (summary != null) {
             Text("${summary.calories}", style = MaterialTheme.typography.labelSmall, color = statusColor, maxLines = 1)
-            Box(Modifier.size(5.dp).clip(CircleShape).background(statusColor))
+            Text(if (over == true) "!" else "✓", style = MaterialTheme.typography.labelSmall, color = statusColor, fontWeight = FontWeight.Bold)
         } else {
             Text("—", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
         }
@@ -1740,6 +2064,7 @@ private fun MealCard(
     meal: Meal,
     target: com.calorielens.app.domain.DailyTarget,
     onEdit: (() -> Unit)?,
+    onCopy: (() -> Unit)?,
     onDelete: (() -> Unit)?
 ) {
     val n = meal.nutrition()
@@ -1761,6 +2086,7 @@ private fun MealCard(
                 }
                 Spacer(Modifier.size(10.dp))
                 Text(meal.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (onCopy != null) IconButton(onClick = onCopy) { Icon(Icons.Default.ContentCopy, "复制到今天") }
                 if (onEdit != null) IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "编辑餐食") }
                 if (onDelete != null) IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "删除") }
             }

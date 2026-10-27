@@ -83,6 +83,17 @@ data class DayTotals(
     val mealCount: Int
 )
 
+data class RecentFoodRow(
+    val name: String,
+    val grams: Double,
+    val caloriesPer100g: Double,
+    val proteinPer100g: Double,
+    val fatPer100g: Double,
+    val carbsPer100g: Double,
+    val fiberPer100g: Double,
+    val lastUsed: Long
+)
+
 @Dao
 interface MealDao {
     @Transaction
@@ -159,6 +170,23 @@ interface MealDao {
 
     @Query("DELETE FROM meals WHERE timestamp < :cutoff")
     suspend fun deleteMealsBefore(cutoff: Long)
+
+    @Query("""
+        SELECT i.name AS name,
+               AVG(i.grams) AS grams,
+               AVG(i.caloriesPer100g) AS caloriesPer100g,
+               AVG(i.proteinPer100g) AS proteinPer100g,
+               AVG(i.fatPer100g) AS fatPer100g,
+               AVG(i.carbsPer100g) AS carbsPer100g,
+               AVG(i.fiberPer100g) AS fiberPer100g,
+               MAX(m.timestamp) AS lastUsed
+        FROM meal_items i INNER JOIN meals m ON i.mealId = m.id
+        WHERE m.timestamp >= :since
+        GROUP BY i.name
+        ORDER BY lastUsed DESC
+        LIMIT 12
+    """)
+    fun observeRecentFoods(since: Long): Flow<List<RecentFoodRow>>
 }
 
 @Database(
@@ -227,6 +255,23 @@ class PersistentMealStore(context: Context) {
         rows.map { it.toDomain() }
     }
     val allMeals: Flow<List<Meal>> = dao.observeAllMeals().map { mapMeals(it) }
+    val recentFoods: Flow<List<FoodItem>> = dao
+        .observeRecentFoods(System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000)
+        .map { rows ->
+            rows.map { row ->
+                FoodItem(
+                    id = "recent-${row.name}",
+                    name = row.name,
+                    grams = row.grams,
+                    caloriesPer100g = row.caloriesPer100g,
+                    proteinPer100g = row.proteinPer100g,
+                    fatPer100g = row.fatPer100g,
+                    carbsPer100g = row.carbsPer100g,
+                    fiberPer100g = row.fiberPer100g,
+                    confidence = 1f
+                )
+            }
+        }
 
     init {
         scope.launch { performMaintenance() }
@@ -271,6 +316,18 @@ class PersistentMealStore(context: Context) {
         )
         refreshSummary(meal.timestamp.toLocalDate(), targetCalories)
         return meal.copy(title = title, items = items, rating = normalizedRating)
+    }
+
+    suspend fun copyMealToToday(source: Meal, targetCalories: Int): Meal {
+        val mealId = UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+        val copiedItems = source.items.map { it.copy(id = UUID.randomUUID().toString()) }
+        dao.replaceMeal(
+            MealEntity(mealId, timestamp, source.title, null, 0),
+            copiedItems.map { it.toEntity(mealId) }
+        )
+        refreshSummary(LocalDate.now(), targetCalories)
+        return Meal(mealId, timestamp, source.title, copiedItems, null, 0)
     }
 
     fun deleteMeal(meal: Meal) {

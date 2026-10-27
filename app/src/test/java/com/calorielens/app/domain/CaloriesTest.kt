@@ -38,4 +38,19 @@ class CaloriesTest {
         assertEquals(true, summary.overLimit)
         assertNull(summary.copy(targetCalories = 0).overLimit)
     }
+
+    @Test fun weeklyStatsUseOnlyLastSevenDays() {
+        val end = java.time.LocalDate.of(2026, 10, 27)
+        val summaries = listOf(
+            DailySummary(end, 1800, 70.0, 200.0, 60.0, 20.0, 1700, 3),
+            DailySummary(end.minusDays(1), 1500, 50.0, 180.0, 50.0, 16.0, 1700, 2),
+            DailySummary(end.minusDays(7), 3000, 20.0, 300.0, 100.0, 2.0, 1700, 4)
+        )
+        val stats = calculateWeeklyStats(summaries, end)
+        assertEquals(2, stats.daysTracked)
+        assertEquals(1, stats.daysWithinTarget)
+        assertEquals(1650, stats.averageCalories)
+        assertEquals(60, stats.averageProtein)
+        assertEquals(5, stats.totalMeals)
+    }
 }

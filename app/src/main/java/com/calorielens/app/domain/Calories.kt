@@ -77,6 +77,32 @@ data class DailySummary(
     val overLimit: Boolean? get() = targetCalories.takeIf { it > 0 }?.let { calories > it }
 }
 
+data class WeeklyStats(
+    val daysTracked: Int,
+    val daysWithinTarget: Int,
+    val averageCalories: Int,
+    val averageProtein: Int,
+    val totalMeals: Int
+) {
+    val targetHitRate: Int get() = if (daysTracked == 0) 0 else (daysWithinTarget * 100 / daysTracked)
+}
+
+fun calculateWeeklyStats(
+    summaries: List<DailySummary>,
+    endDate: java.time.LocalDate
+): WeeklyStats {
+    val start = endDate.minusDays(6)
+    val week = summaries.filter { it.localDate in start..endDate }
+    if (week.isEmpty()) return WeeklyStats(0, 0, 0, 0, 0)
+    return WeeklyStats(
+        daysTracked = week.size,
+        daysWithinTarget = week.count { it.overLimit == false },
+        averageCalories = week.sumOf { it.calories } / week.size,
+        averageProtein = (week.sumOf { it.protein } / week.size).roundToInt(),
+        totalMeals = week.sumOf { it.mealCount }
+    )
+}
+
 data class MealScore(val total: Int, val reasons: List<String>)
 
 fun scoreMeal(meal: Meal, dailyTarget: DailyTarget): MealScore {
