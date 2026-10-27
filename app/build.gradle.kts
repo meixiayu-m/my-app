@@ -9,6 +9,18 @@ android {
     namespace = "com.calorielens.app"
     compileSdk = 35
 
+    val stableStorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+    signingConfigs {
+        if (!stableStorePath.isNullOrBlank() && file(stableStorePath).exists()) {
+            create("stable") {
+                storeFile = file(stableStorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -19,12 +31,21 @@ android {
         minSdk = 26
         targetSdk = 35
         // 每次可安装的新 APK 递增，避免手机把相同版本当成旧安装包并继续使用桌面图标缓存。
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
     }
 
     buildFeatures { compose = true }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+
+    buildTypes {
+        getByName("debug") {
+            // CI 提供固定 Keystore 时，Debug APK 也使用同一签名，后续版本才能覆盖安装。
+            if (signingConfigs.names.contains("stable")) {
+                signingConfig = signingConfigs.getByName("stable")
+            }
+        }
+    }
 }
 
 kotlin {

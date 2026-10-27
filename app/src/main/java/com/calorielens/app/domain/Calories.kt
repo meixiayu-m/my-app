@@ -64,6 +64,19 @@ data class Meal(
     }
 }
 
+data class DailySummary(
+    val localDate: java.time.LocalDate,
+    val calories: Int,
+    val protein: Double,
+    val carbs: Double,
+    val fat: Double,
+    val fiber: Double,
+    val targetCalories: Int,
+    val mealCount: Int
+) {
+    val overLimit: Boolean? get() = targetCalories.takeIf { it > 0 }?.let { calories > it }
+}
+
 data class MealScore(val total: Int, val reasons: List<String>)
 
 fun scoreMeal(meal: Meal, dailyTarget: DailyTarget): MealScore {

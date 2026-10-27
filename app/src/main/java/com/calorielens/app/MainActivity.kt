@@ -50,6 +50,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
@@ -118,14 +119,18 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.calorielens.app.data.ApiKeyStore
 import com.calorielens.app.data.AppAppearance
 import com.calorielens.app.data.AppTheme
 import com.calorielens.app.data.AppWallpaper
 import com.calorielens.app.data.AppearanceStore
+import com.calorielens.app.data.BackupStore
 import com.calorielens.app.data.ProfileStore
 import com.calorielens.app.data.PersistentMealStore
 import com.calorielens.app.domain.ActivityLevel
+import com.calorielens.app.domain.DailySummary
 import com.calorielens.app.domain.FoodItem
 import com.calorielens.app.domain.Meal
 import com.calorielens.app.domain.Nutrition
@@ -146,6 +151,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.YearMonth
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -215,6 +221,9 @@ private fun CalorieLensTheme(appearance: AppAppearance, content: @Composable () 
 private fun CalorieLensApp() {
     val context = LocalContext.current
     var appearance by remember { mutableStateOf(AppearanceStore.read(context)) }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { ApiKeyStore.read(context) }
+    }
     CalorieLensTheme(appearance) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             CustomWallpaper(appearance.customWallpaperUri)
@@ -278,7 +287,10 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val store = remember { PersistentMealStore(context) }
-    val meals by store.meals.collectAsState(initial = emptyList())
+    var todayDate by remember { mutableStateOf(LocalDate.now()) }
+    val todayMealsFlow = remember(todayDate) { store.mealsForDate(todayDate) }
+    val todayMeals by todayMealsFlow.collectAsState(initial = emptyList())
+    val dailySummaries by store.dailySummaries.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     val recognizer = remember { DirectZhipuFoodRecognizer() }
     var recognizing by remember { mutableStateOf(false) }
@@ -289,6 +301,9 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     var showAppearance by remember { mutableStateOf(false) }
     var showManualMeal by remember { mutableStateOf(false) }
     var ratingTarget by remember { mutableStateOf<Meal?>(null) }
+    var editingMeal by remember { mutableStateOf<Meal?>(null) }
+    var editingComment by remember { mutableStateOf("") }
+    var backupMessage by remember { mutableStateOf<String?>(null) }
     var pendingItems by remember { mutableStateOf<List<FoodItem>?>(null) }
     var pendingComment by remember { mutableStateOf("") }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -299,12 +314,18 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var fabExpanded by remember { mutableStateOf(false) }
     val target = calculateDailyTarget(profile)
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        todayDate = LocalDate.now()
+        scope.launch { store.performMaintenance() }
+    }
     LaunchedEffect(recognizing) {
         if (recognizing) {
-            delay(900)
-            recognitionStage = "正在把照片交给视觉模型…"
-            delay(2400)
-            recognitionStage = "正在估算份量和营养…"
+            var index = kotlin.random.Random.nextInt(RECOGNITION_WAIT_LINES.size)
+            while (true) {
+                recognitionStage = RECOGNITION_WAIT_LINES[index % RECOGNITION_WAIT_LINES.size]
+                index++
+                delay(2300)
+            }
         }
     }
 
@@ -314,7 +335,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
             recognizing = true
             fabExpanded = false
             pendingImageUri = uri
-            recognitionStage = "正在读取照片…"
+            recognitionStage = RECOGNITION_WAIT_LINES.first()
             scope.launch {
                 try {
                     recognitionStage = "正在理解画面并估算营养…"
@@ -352,6 +373,44 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) recognizeImage(uri)
     }
+    val backupExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    BackupStore.write(
+                        context = context,
+                        target = uri,
+                        meals = store.allMealsSnapshot(),
+                        summaries = store.summariesSnapshot(),
+                        profile = profile,
+                        appearance = appearance
+                    )
+                }.onSuccess {
+                    backupMessage = "备份已导出；API Key 未包含在文件中。"
+                }.onFailure {
+                    backupMessage = "备份失败：${it.message ?: \"无法写入文件\"}"
+                }
+            }
+        }
+    }
+    val backupImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    val payload = BackupStore.read(context, uri)
+                    store.restoreBackup(payload.meals, payload.summaries)
+                    ProfileStore.save(context, payload.profile)
+                    AppearanceStore.save(context, payload.appearance)
+                    profile = payload.profile
+                    onAppearanceChanged(payload.appearance)
+                }.onSuccess {
+                    backupMessage = "备份已导入。API Key 不在备份中；新安装后需重新填写。"
+                }.onFailure {
+                    backupMessage = "导入失败：${it.message ?: \"文件格式不正确\"}"
+                }
+            }
+        }
+    }
 
     val goHome = {
         pendingItems = null
@@ -363,13 +422,15 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
         showApiKey = false
         showAppearance = false
         showManualMeal = false
+        editingMeal = null
+        editingComment = ""
     }
     Scaffold(
         containerColor = if (appearance.customWallpaperUri != null || appearance.glass) Color.Transparent else MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    if (pendingItems != null || showProfile || showHistory || showApiKey || showAppearance || showManualMeal) {
+                    if (pendingItems != null || editingMeal != null || showProfile || showHistory || showApiKey || showAppearance || showManualMeal) {
                         IconButton(onClick = goHome) { Icon(Icons.Default.ArrowBack, "返回") }
                     }
                 },
@@ -392,7 +453,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                     }
                 },
                 actions = {
-                    if (pendingItems == null && !showProfile && !showHistory && !showApiKey && !showAppearance && !showManualMeal) {
+                    if (pendingItems == null && editingMeal == null && !showProfile && !showHistory && !showApiKey && !showAppearance && !showManualMeal) {
                         IconButton(onClick = { showHistory = true }) {
                             Icon(Icons.Default.History, contentDescription = "饮食日志")
                         }
@@ -405,7 +466,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
             )
         },
         floatingActionButton = {
-            if (pendingItems == null && !showProfile && !showHistory && !showApiKey && !showAppearance && !showManualMeal && !recognizing) {
+            if (pendingItems == null && editingMeal == null && !showProfile && !showHistory && !showApiKey && !showAppearance && !showManualMeal && !recognizing) {
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     AnimatedVisibility(
                         visible = fabExpanded,
@@ -471,9 +532,14 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                         }
                     }
                 },
-                onSave = { items, title ->
+                onSave = { items, title, _ ->
                     scope.launch {
-                        ratingTarget = store.addMealAndReturn(items, title = title)
+                        ratingTarget = store.addMealAndReturn(
+                            items = items,
+                            title = title,
+                            targetCalories = target.targetCalories,
+                            imageSourceUri = pendingImageUri
+                        )
                         pendingItems = null
                         pendingImageUri = null
                         pendingComment = ""
@@ -481,11 +547,59 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                 },
                 modifier = Modifier.padding(padding)
             )
+            editingMeal != null -> {
+                val meal = editingMeal!!
+                val existingImage = meal.imagePath?.let(::File)?.takeIf(File::exists)?.let(Uri::fromFile)
+                MealEditor(
+                    initialItems = meal.items,
+                    imageUri = existingImage,
+                    target = target,
+                    aiComment = editingComment,
+                    refinementError = refinementError,
+                    refining = refining,
+                    hapticsEnabled = appearance.haptics,
+                    initialTitle = meal.title,
+                    initialRating = meal.rating,
+                    allowRatingEdit = true,
+                    onCancel = { editingMeal = null; editingComment = "" },
+                    onRefine = { items, note ->
+                        if (existingImage != null && !refining && note.isNotBlank()) {
+                            refining = true
+                            refinementError = null
+                            scope.launch {
+                                try {
+                                    val result = recognizer.refine(context, existingImage, items, note)
+                                    editingMeal = meal.copy(items = result.items)
+                                    editingComment = result.comment
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    refinementError = error.message ?: "AI 修正失败，请稍后重试"
+                                } finally {
+                                    refining = false
+                                }
+                            }
+                        }
+                    },
+                    onSave = { items, title, rating ->
+                        scope.launch {
+                            store.updateMealAndReturn(meal, items, title, rating, target.targetCalories)
+                            editingMeal = null
+                            editingComment = ""
+                        }
+                    },
+                    modifier = Modifier.padding(padding)
+                )
+            }
             showManualMeal -> ManualMealEditor(
                 onCancel = { showManualMeal = false },
                 onSave = { items, title ->
                     scope.launch {
-                        ratingTarget = store.addMealAndReturn(items, title = title)
+                        ratingTarget = store.addMealAndReturn(
+                            items = items,
+                            title = title,
+                            targetCalories = target.targetCalories
+                        )
                         showManualMeal = false
                     }
                 },
@@ -496,7 +610,14 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                 profile = it
                 showProfile = false
             }, Modifier.padding(padding))
-            showHistory -> HistoryScreen(meals, target, Modifier.padding(padding))
+            showHistory -> HistoryScreen(
+                store = store,
+                summaries = dailySummaries,
+                target = target,
+                hapticsEnabled = appearance.haptics,
+                onEdit = { editingMeal = it; showHistory = false },
+                modifier = Modifier.padding(padding)
+            )
             showApiKey -> ApiKeyEditor(
                 currentKey = ApiKeyStore.read(context).orEmpty(),
                 currentModel = ApiKeyStore.readModel(context).orEmpty(),
@@ -507,6 +628,9 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                 },
                 onClear = { ApiKeyStore.clear(context); showApiKey = false },
                 onAppearance = { showApiKey = false; showAppearance = true },
+                onExportBackup = { backupExporter.launch("calorie-lens-backup-${LocalDate.now()}.json") },
+                onImportBackup = { backupImporter.launch(arrayOf("application/json", "text/plain")) },
+                backupMessage = backupMessage,
                 modifier = Modifier.padding(padding)
             )
             showAppearance -> AppearanceEditor(
@@ -515,7 +639,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                 modifier = Modifier.padding(padding)
             )
             else -> HomeScreen(
-                meals = meals,
+                meals = todayMeals,
                 target = target,
                 recognizing = recognizing,
                 recognizingImageUri = pendingImageUri.takeIf { recognizing },
@@ -524,7 +648,8 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                 hapticsEnabled = appearance.haptics,
                 onDismissError = { recognitionError = null },
                 onDelete = { meal -> store.deleteMeal(meal) },
-                onRestore = store::restoreMeal,
+                onRestore = { meal -> store.restoreMeal(meal, target.targetCalories) },
+                onEdit = { editingMeal = it },
                 onEditProfile = { showProfile = true },
                 modifier = Modifier.padding(padding)
             )
@@ -534,7 +659,10 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
         RatingDialog(
             meal = meal,
             hapticsEnabled = appearance.haptics,
-            onRate = { rating -> store.updateMeal(meal, meal.items, meal.title, rating); ratingTarget = null },
+            onRate = { rating ->
+                store.updateMeal(meal, meal.items, meal.title, rating, target.targetCalories)
+                ratingTarget = null
+            },
             onSkip = { ratingTarget = null }
         )
     }
@@ -551,12 +679,16 @@ private fun MealEditor(
     hapticsEnabled: Boolean,
     onCancel: () -> Unit,
     onRefine: (List<FoodItem>, String) -> Unit,
-    onSave: (List<FoodItem>, String) -> Unit,
+    onSave: (List<FoodItem>, String, Int) -> Unit,
+    initialTitle: String = defaultMealTitle(),
+    initialRating: Int = 0,
+    allowRatingEdit: Boolean = false,
     modifier: Modifier
 ) {
     val haptic = LocalHapticFeedback.current
     var items by remember(initialItems) { mutableStateOf(initialItems) }
-    var title by remember { mutableStateOf(defaultMealTitle()) }
+    var title by remember(initialTitle) { mutableStateOf(initialTitle) }
+    var rating by remember(initialRating) { mutableStateOf(initialRating) }
     var mealMenuOpen by remember { mutableStateOf(false) }
     var correctionEnabled by remember(initialItems) { mutableStateOf(false) }
     var correctionText by remember(initialItems) { mutableStateOf("") }
@@ -620,9 +752,12 @@ private fun MealEditor(
                     Spacer(Modifier.size(8.dp))
                     Column(Modifier.weight(1f)) {
                         Text("还是不太像？", fontWeight = FontWeight.Bold)
-                        Text("改完名称后也可以直接用一句话告诉 AI。", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            if (imageUri != null) "改完名称后也可以直接用一句话告诉 AI。" else "原图只保留当天；现在仍可手动修改名称和克数。",
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
-                    Checkbox(checked = correctionEnabled, onCheckedChange = {
+                    Checkbox(checked = correctionEnabled && imageUri != null, enabled = imageUri != null, onCheckedChange = {
                         if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         correctionEnabled = it
                     })
@@ -652,7 +787,7 @@ private fun MealEditor(
                         if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onRefine(items, buildRefinementInstruction(correctionText, itemValuesChanged))
                     },
-                    enabled = canRefine && !refining,
+                    enabled = imageUri != null && canRefine && !refining,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp)
                 ) {
@@ -670,12 +805,26 @@ private fun MealEditor(
         if (itemValuesChanged) {
             Text("当前热量仍按旧营养密度计算；点击上方 AI 校正后会按新名称和克数更新。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
         }
+        if (allowRatingEdit) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                MealRatingBar(
+                    rating = rating,
+                    onRatingChanged = { rating = it },
+                    hapticsEnabled = hapticsEnabled,
+                    modifier = Modifier.padding(14.dp)
+                )
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(onClick = onCancel, modifier = Modifier.weight(0.38f), shape = RoundedCornerShape(18.dp)) { Text("取消") }
             Button(
                 onClick = {
                     if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSave(items, title)
+                    onSave(items, title, rating)
                 },
                 modifier = Modifier.weight(0.62f),
                 shape = RoundedCornerShape(18.dp)
@@ -924,9 +1073,14 @@ private fun localMealRemark(nutrition: Nutrition, target: com.calorielens.app.do
 }
 
 @Composable
-private fun MealRatingBar(rating: Int, onRatingChanged: (Int) -> Unit, hapticsEnabled: Boolean) {
+private fun MealRatingBar(
+    rating: Int,
+    onRatingChanged: (Int) -> Unit,
+    hapticsEnabled: Boolean,
+    modifier: Modifier = Modifier
+) {
     val haptic = LocalHapticFeedback.current
-    Column {
+    Column(modifier) {
         Text("这顿饭好吃吗？", fontWeight = FontWeight.SemiBold)
         Row(verticalAlignment = Alignment.CenterVertically) {
             repeat(5) { index ->
@@ -982,6 +1136,16 @@ private fun ratingLabel(rating: Int): String = when (rating) {
 }
 
 private val MEAL_TYPES = listOf("早餐", "午餐", "晚餐", "下午茶", "夜宵", "加餐", "其他")
+private val RECOGNITION_WAIT_LINES = listOf(
+    "正在仔细看看这盘菜是什么…",
+    "让我猜猜这顿吃了多少卡路里 🔍",
+    "正在努力辨认食材，马上就好~",
+    "AI 营养师正在疯狂计算中…",
+    "先别急，我正在看看酱汁和配菜 👀",
+    "把每一口都认真估一估，很快就有结果啦",
+    "这盘看起来不错，我正在拆解食材",
+    "正在帮你整理这顿饭的营养小账本 📒"
+)
 
 private fun defaultMealTitle(time: LocalTime = LocalTime.now()): String = when {
     time < LocalTime.of(10, 30) -> "早餐"
@@ -1048,6 +1212,7 @@ private fun HomeScreen(
     onDismissError: () -> Unit,
     onDelete: (Meal) -> Unit,
     onRestore: (Meal) -> Unit,
+    onEdit: (Meal) -> Unit,
     onEditProfile: () -> Unit,
     modifier: Modifier
 ) {
@@ -1127,10 +1292,15 @@ private fun HomeScreen(
             }
         }
         items(todayMeals, key = { it.id }) { meal ->
-            MealCard(meal, target, onDelete = {
-                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                deleteCandidate = meal
-            })
+            MealCard(
+                meal = meal,
+                target = target,
+                onEdit = { onEdit(meal) },
+                onDelete = {
+                    if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    deleteCandidate = meal
+                }
+            )
         }
     }
     deleteCandidate?.let { meal ->
@@ -1253,7 +1423,7 @@ private fun RecognitionLoadingCard(imageUri: Uri?, stage: String, consumed: Int)
                 trackColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
             )
             RunningCat(
-                modifier = Modifier.fillMaxWidth().height(38.dp),
+                modifier = Modifier.fillMaxWidth().height(62.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)
             )
         }
@@ -1269,41 +1439,48 @@ private fun RunningCat(modifier: Modifier, color: Color) {
         label = "running-cat-progress"
     )
     Canvas(modifier) {
-        val runWidth = size.width * 0.74f
-        val x = size.width * 0.08f + runWidth * motion
-        val groundY = size.height * 0.78f
+        val x = size.width * 0.08f + size.width * 0.7f * motion
+        val groundY = size.height * 0.82f
         val bob = kotlin.math.sin(motion.toDouble() * Math.PI * 8.0).toFloat() * 1.8f
         val stride = kotlin.math.sin(motion.toDouble() * Math.PI * 10.0).toFloat() * 4.5f
-        val stroke = 2.2.dp.toPx()
+        val outline = 1.7.dp.toPx()
+        val ink = Color(0xFF384039)
 
-        drawLine(color.copy(alpha = 0.24f), androidx.compose.ui.geometry.Offset(0f, groundY + 7.dp.toPx()), androidx.compose.ui.geometry.Offset(size.width, groundY + 7.dp.toPx()), strokeWidth = 1.dp.toPx())
-        drawLine(color, androidx.compose.ui.geometry.Offset(x - 17.dp.toPx(), groundY - 2.dp.toPx() + bob), androidx.compose.ui.geometry.Offset(x - 12.dp.toPx() + stride, groundY + 5.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
-        drawLine(color, androidx.compose.ui.geometry.Offset(x + 10.dp.toPx(), groundY - 2.dp.toPx() + bob), androidx.compose.ui.geometry.Offset(x + 5.dp.toPx() - stride, groundY + 5.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
-        drawOval(
-            color = color,
-            topLeft = androidx.compose.ui.geometry.Offset(x - 20.dp.toPx(), groundY - 20.dp.toPx() + bob),
-            size = androidx.compose.ui.geometry.Size(35.dp.toPx(), 20.dp.toPx())
-        )
-        drawCircle(color, radius = 9.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x + 17.dp.toPx(), groundY - 19.dp.toPx() + bob))
-        drawCircle(Color.White, radius = 1.5.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x + 20.dp.toPx(), groundY - 21.dp.toPx() + bob))
-        val ears = Path().apply {
-            moveTo(x + 11.dp.toPx(), groundY - 25.dp.toPx() + bob)
-            lineTo(x + 14.dp.toPx(), groundY - 33.dp.toPx() + bob)
-            lineTo(x + 18.dp.toPx(), groundY - 26.dp.toPx() + bob)
-            moveTo(x + 19.dp.toPx(), groundY - 26.dp.toPx() + bob)
-            lineTo(x + 23.dp.toPx(), groundY - 32.dp.toPx() + bob)
-            lineTo(x + 25.dp.toPx(), groundY - 24.dp.toPx() + bob)
-        }
-        drawPath(ears, color)
+        drawLine(Color(0xFF8AA493).copy(alpha = 0.3f), androidx.compose.ui.geometry.Offset(0f, groundY + 6.dp.toPx()), androidx.compose.ui.geometry.Offset(size.width, groundY + 6.dp.toPx()), strokeWidth = 1.dp.toPx())
+        drawLine(color.copy(alpha = 0.35f), androidx.compose.ui.geometry.Offset(x - 38.dp.toPx(), groundY - 18.dp.toPx()), androidx.compose.ui.geometry.Offset(x - 29.dp.toPx(), groundY - 18.dp.toPx()), strokeWidth = 1.2.dp.toPx(), cap = StrokeCap.Round)
+        drawLine(color.copy(alpha = 0.25f), androidx.compose.ui.geometry.Offset(x - 43.dp.toPx(), groundY - 11.dp.toPx()), androidx.compose.ui.geometry.Offset(x - 32.dp.toPx(), groundY - 11.dp.toPx()), strokeWidth = 1.2.dp.toPx(), cap = StrokeCap.Round)
         val tail = Path().apply {
-            moveTo(x - 19.dp.toPx(), groundY - 14.dp.toPx() + bob)
+            moveTo(x - 22.dp.toPx(), groundY - 17.dp.toPx() + bob)
             cubicTo(
-                x - 33.dp.toPx(), groundY - 27.dp.toPx() + bob,
-                x - 30.dp.toPx(), groundY - 5.dp.toPx(),
-                x - 38.dp.toPx(), groundY - 14.dp.toPx()
+                x - 40.dp.toPx(), groundY - 30.dp.toPx() + bob,
+                x - 42.dp.toPx(), groundY - 8.dp.toPx(),
+                x - 32.dp.toPx(), groundY - 3.dp.toPx()
             )
         }
-        drawPath(tail, color, style = Stroke(width = stroke, cap = StrokeCap.Round))
+        drawPath(tail, color.copy(alpha = 0.75f), style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round))
+        drawOval(color, androidx.compose.ui.geometry.Offset(x - 25.dp.toPx(), groundY - 21.dp.toPx() + bob), androidx.compose.ui.geometry.Size(38.dp.toPx(), 20.dp.toPx()))
+        drawLine(ink, androidx.compose.ui.geometry.Offset(x - 15.dp.toPx(), groundY - 3.dp.toPx() + bob), androidx.compose.ui.geometry.Offset(x - 12.dp.toPx() + stride, groundY + 4.dp.toPx()), strokeWidth = outline, cap = StrokeCap.Round)
+        drawLine(ink, androidx.compose.ui.geometry.Offset(x + 7.dp.toPx(), groundY - 3.dp.toPx() + bob), androidx.compose.ui.geometry.Offset(x + 4.dp.toPx() - stride, groundY + 4.dp.toPx()), strokeWidth = outline, cap = StrokeCap.Round)
+        val headCenter = androidx.compose.ui.geometry.Offset(x + 20.dp.toPx(), groundY - 24.dp.toPx() + bob)
+        drawCircle(color, radius = 13.dp.toPx(), center = headCenter)
+        val ears = Path().apply {
+            moveTo(x + 9.dp.toPx(), groundY - 32.dp.toPx() + bob)
+            lineTo(x + 12.dp.toPx(), groundY - 42.dp.toPx() + bob)
+            lineTo(x + 18.dp.toPx(), groundY - 34.dp.toPx() + bob)
+            moveTo(x + 23.dp.toPx(), groundY - 34.dp.toPx() + bob)
+            lineTo(x + 29.dp.toPx(), groundY - 41.dp.toPx() + bob)
+            lineTo(x + 32.dp.toPx(), groundY - 30.dp.toPx() + bob)
+        }
+        drawPath(ears, color)
+        drawCircle(ink, 1.3.dp.toPx(), androidx.compose.ui.geometry.Offset(x + 16.dp.toPx(), groundY - 26.dp.toPx() + bob))
+        drawCircle(ink, 1.3.dp.toPx(), androidx.compose.ui.geometry.Offset(x + 25.dp.toPx(), groundY - 26.dp.toPx() + bob))
+        drawCircle(Color(0xFFFF9B9B).copy(alpha = 0.8f), 1.8.dp.toPx(), androidx.compose.ui.geometry.Offset(x + 13.dp.toPx(), groundY - 21.dp.toPx() + bob))
+        drawCircle(Color(0xFFFF9B9B).copy(alpha = 0.8f), 1.8.dp.toPx(), androidx.compose.ui.geometry.Offset(x + 29.dp.toPx(), groundY - 21.dp.toPx() + bob))
+        drawPath(Path().apply {
+            moveTo(x + 19.dp.toPx(), groundY - 22.dp.toPx() + bob)
+            lineTo(x + 22.dp.toPx(), groundY - 22.dp.toPx() + bob)
+            lineTo(x + 20.5.dp.toPx(), groundY - 20.dp.toPx() + bob)
+        }, Color(0xFFD86E72))
     }
 }
 
@@ -1367,39 +1544,191 @@ private fun homeGreeting(meals: List<Meal>, consumed: Int, target: Int): Pair<St
 }
 
 @Composable
-private fun HistoryScreen(meals: List<Meal>, target: com.calorielens.app.domain.DailyTarget, modifier: Modifier) {
-    val grouped = meals.groupBy { it.localDate() }.entries.sortedByDescending { it.key }
-    val todayMeals = grouped.firstOrNull { it.key == LocalDate.now() }?.value.orEmpty()
-    val todayNutrition = todayMeals.totalNutrition()
-    LazyColumn(
-        modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+private fun HistoryScreen(
+    store: PersistentMealStore,
+    summaries: List<DailySummary>,
+    target: com.calorielens.app.domain.DailyTarget,
+    hapticsEnabled: Boolean,
+    onEdit: (Meal) -> Unit,
+    modifier: Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    var month by remember { mutableStateOf(YearMonth.now()) }
+    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
+    val selectedMealsFlow = remember(selectedDate) { store.mealsForDate(selectedDate) }
+    val selectedMeals by selectedMealsFlow.collectAsState(initial = emptyList())
+    val byDate = summaries.associateBy { it.localDate }
+    val leadingDays = month.atDay(1).dayOfWeek.value - 1
+    val cells: List<LocalDate?> = buildList {
+        repeat(leadingDays) { add(null) }
+        for (day in 1..month.lengthOfMonth()) add(month.atDay(day))
+        while (size % 7 != 0) add(null)
+    }
+    val selectedSummary = byDate[selectedDate]
+
+    Column(
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item {
-            Spacer(Modifier.height(8.dp))
-            Text("饮食日志", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text("按日期查看每一天的摄入和餐食记录。", style = MaterialTheme.typography.bodySmall)
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("今天概览", fontWeight = FontWeight.Bold)
-                    Text("${todayNutrition.calories} / ${target.targetCalories} kcal · ${todayMeals.size} 餐")
-                    Text("蛋白质 ${todayNutrition.protein.toInt()}g · 碳水 ${todayNutrition.carbs.toInt()}g · 脂肪 ${todayNutrition.fat.toInt()}g · 纤维 ${todayNutrition.fiber.toInt()}g", style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(8.dp))
+        Text("饮食日历", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("每天只看一眼热量和是否超标；近 30 天仍可查看并编辑餐食。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = {
+                        month = month.minusMonths(1)
+                        if (selectedDate.year != month.year || selectedDate.monthValue != month.monthValue) {
+                            selectedDate = month.atDay(1)
+                        }
+                    }) { Icon(Icons.Default.ArrowBack, "上个月") }
+                    Text("${month.year} 年 ${month.monthValue} 月", modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                    IconButton(onClick = { month = month.plusMonths(1) }) { Icon(Icons.Default.ArrowForward, "下个月") }
+                }
+                Row(Modifier.fillMaxWidth()) {
+                    listOf("一", "二", "三", "四", "五", "六", "日").forEach { day ->
+                        Text(day, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                cells.chunked(7).forEach { week ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        week.forEach { date ->
+                            CalendarDayCell(
+                                date = date,
+                                summary = date?.let(byDate::get),
+                                fallbackTarget = target.targetCalories,
+                                selected = date == selectedDate,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    if (date != null) {
+                                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        selectedDate = date
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CalendarLegend(Color(0xFF4F9A68), "未超标")
+                    CalendarLegend(Color(0xFFD46858), "超标")
+                    CalendarLegend(MaterialTheme.colorScheme.outline, "无记录")
                 }
             }
         }
-        if (grouped.isEmpty()) item {
-            Text("还没有历史记录。保存第一餐后，这里会自动生成每日统计。", modifier = Modifier.padding(vertical = 16.dp))
+        SelectedDaySummary(selectedDate, selectedSummary, target)
+        Text("${selectedDate.monthValue} 月 ${selectedDate.dayOfMonth} 日餐食", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        if (selectedMeals.isEmpty()) {
+            Text(
+                if (selectedSummary != null) "这一天的详细餐食已经归档，只保留热量汇总。" else "这一天还没有记录。",
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)).padding(16.dp),
+                style = MaterialTheme.typography.bodySmall
+            )
+        } else {
+            selectedMeals.sortedByDescending { it.timestamp }.forEach { meal ->
+                MealCard(meal, target, onEdit = { onEdit(meal) }, onDelete = null)
+            }
         }
-        grouped.forEach { (day, dayMeals) ->
-            item(key = day.toString()) {
-                val n = dayMeals.totalNutrition()
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${day.year}年${day.monthValue}月${day.dayOfMonth}日", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("${n.calories} kcal · 蛋白质 ${n.protein.toInt()}g · ${dayMeals.size} 餐", style = MaterialTheme.typography.bodySmall)
-                    dayMeals.sortedByDescending { it.timestamp }.forEach { meal -> MealCard(meal, target, onDelete = null) }
+        Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun CalendarDayCell(
+    date: LocalDate?,
+    summary: DailySummary?,
+    fallbackTarget: Int,
+    selected: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit
+) {
+    if (date == null) {
+        Spacer(modifier.height(54.dp))
+        return
+    }
+    val over = summary?.let { it.calories > (it.targetCalories.takeIf { target -> target > 0 } ?: fallbackTarget) }
+    val statusColor = when (over) {
+        true -> Color(0xFFD46858)
+        false -> Color(0xFF4F9A68)
+        null -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    }
+    Column(
+        modifier.height(54.dp).clip(RoundedCornerShape(14.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.17f)
+                else statusColor.copy(alpha = 0.07f)
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("${date.dayOfMonth}", fontWeight = if (date == LocalDate.now()) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.labelLarge)
+        if (summary != null) {
+            Text("${summary.calories}", style = MaterialTheme.typography.labelSmall, color = statusColor, maxLines = 1)
+            Box(Modifier.size(5.dp).clip(CircleShape).background(statusColor))
+        } else {
+            Text("—", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
+        }
+    }
+}
+
+@Composable
+private fun CalendarLegend(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(7.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(4.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun SelectedDaySummary(
+    date: LocalDate,
+    summary: DailySummary?,
+    target: com.calorielens.app.domain.DailyTarget
+) {
+    val calories = summary?.calories ?: 0
+    val targetCalories = summary?.targetCalories?.takeIf { it > 0 } ?: target.targetCalories
+    val over = summary?.let { calories > targetCalories }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            NutritionRing(
+                value = calories.toFloat(),
+                target = targetCalories.toFloat(),
+                label = "${date.monthValue}/${date.dayOfMonth}",
+                center = "$calories",
+                unit = "kcal",
+                modifier = Modifier.size(112.dp),
+                strokeWidth = 10.dp
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(
+                    when (over) {
+                        true -> "这天超过目标"
+                        false -> "这天在目标内"
+                        null -> "这天暂无汇总"
+                    },
+                    fontWeight = FontWeight.Bold,
+                    color = when (over) {
+                        true -> Color(0xFFD46858)
+                        false -> Color(0xFF4F9A68)
+                        null -> MaterialTheme.colorScheme.onSurface
+                    }
+                )
+                Text("目标 $targetCalories kcal · ${summary?.mealCount ?: 0} 餐", style = MaterialTheme.typography.bodySmall)
+                if (summary != null) {
+                    Text("蛋白质 ${summary.protein.toInt()}g · 碳水 ${summary.carbs.toInt()}g · 脂肪 ${summary.fat.toInt()}g", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -1407,7 +1736,12 @@ private fun HistoryScreen(meals: List<Meal>, target: com.calorielens.app.domain.
 }
 
 @Composable
-private fun MealCard(meal: Meal, target: com.calorielens.app.domain.DailyTarget, onDelete: (() -> Unit)?) {
+private fun MealCard(
+    meal: Meal,
+    target: com.calorielens.app.domain.DailyTarget,
+    onEdit: (() -> Unit)?,
+    onDelete: (() -> Unit)?
+) {
     val n = meal.nutrition()
     val score = scoreMeal(meal, target)
     val appeared = remember(meal.id) { Animatable(0f) }
@@ -1427,6 +1761,7 @@ private fun MealCard(meal: Meal, target: com.calorielens.app.domain.DailyTarget,
                 }
                 Spacer(Modifier.size(10.dp))
                 Text(meal.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (onEdit != null) IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "编辑餐食") }
                 if (onDelete != null) IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "删除") }
             }
             Spacer(Modifier.height(8.dp))
@@ -1447,6 +1782,9 @@ private fun ApiKeyEditor(
     onSave: (String, String) -> Unit,
     onClear: () -> Unit,
     onAppearance: () -> Unit,
+    onExportBackup: () -> Unit,
+    onImportBackup: () -> Unit,
+    backupMessage: String?,
     modifier: Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -1533,6 +1871,20 @@ private fun ApiKeyEditor(
         Text("模型列表可能只返回模型 ID；每分钟限流、剩余 Token 和免费额度通常不由此接口提供，请以智谱控制台为准。", style = MaterialTheme.typography.bodySmall)
         Button(onClick = { onSave(key, model) }, enabled = key.isNotBlank()) { Text("保存设置") }
         OutlinedButton(onClick = onAppearance) { Text("主题与壁纸") }
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("记录备份", fontWeight = FontWeight.Bold)
+                Text("导出餐食、每日汇总、个人资料和外观设置。为了安全，API Key 不会写入备份。", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onExportBackup, modifier = Modifier.weight(1f)) { Text("导出备份") }
+                    OutlinedButton(onClick = onImportBackup, modifier = Modifier.weight(1f)) { Text("导入备份") }
+                }
+                backupMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+            }
+        }
         OutlinedButton(onClick = onClear, enabled = currentKey.isNotBlank()) { Text("清除本机 Key") }
         Text("提示：个人使用可以这样配置，但如果 APK 分享给别人，Key 仍可能被提取。公开版本应改回后端代理模式。", style = MaterialTheme.typography.bodySmall)
     }

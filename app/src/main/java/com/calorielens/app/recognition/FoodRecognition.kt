@@ -6,7 +6,9 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Base64
+import android.util.Log
 import com.calorielens.app.data.ApiKeyStore
 import com.calorielens.app.domain.FoodItem
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +53,9 @@ interface FoodRecognizer {
  * Key 从 Android Keystore 加密存储读取，不会写进源码、Gradle 或 APK 常量。
  */
 class DirectZhipuFoodRecognizer : FoodRecognizer {
+    private var cachedImageUri: String? = null
+    private var cachedImageBytes: ByteArray? = null
+
     override suspend fun recognize(context: Context, imageUri: Uri): RecognitionResult = request(
         context = context,
         imageUri = imageUri,
@@ -94,13 +99,21 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
         systemPrompt: String,
         userText: String
     ): RecognitionResult = withContext(Dispatchers.IO) {
+        val startedAt = SystemClock.elapsedRealtime()
         val apiKey = ApiKeyStore.read(context)?.trim().orEmpty()
         require(apiKey.isNotEmpty()) { "请先在设置中填写智谱 API Key" }
         val model = ApiKeyStore.readModel(context)?.trim()
             .orEmpty()
             .ifBlank { DEFAULT_MODEL }
         val resolver = context.contentResolver
-        val bytes = compressImage(resolver, imageUri)
+        val bytes = synchronized(this@DirectZhipuFoodRecognizer) {
+            val key = imageUri.toString()
+            cachedImageBytes?.takeIf { cachedImageUri == key } ?: compressImage(resolver, imageUri).also {
+                cachedImageUri = key
+                cachedImageBytes = it
+            }
+        }
+        val preparedAt = SystemClock.elapsedRealtime()
 
         val imageData = "data:image/jpeg;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}"
         val payload = JSONObject()
@@ -123,7 +136,14 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
             .header("Content-Type", "application/json")
             .post(payload.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        parseResponse(executeWithRateLimitRetry(request))
+        val body = executeWithRateLimitRetry(request)
+        val responseAt = SystemClock.elapsedRealtime()
+        parseResponse(body).also {
+            Log.i(
+                TAG,
+                "recognition timing: prepare=${preparedAt - startedAt}ms network=${responseAt - preparedAt}ms parse=${SystemClock.elapsedRealtime() - responseAt}ms bytes=${bytes.size}"
+            )
+        }
     }
 
     private suspend fun executeWithRateLimitRetry(request: Request): String {
@@ -316,9 +336,10 @@ class DirectZhipuFoodRecognizer : FoodRecognizer {
     private companion object {
         const val API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         const val DEFAULT_MODEL = "glm-4.6v-flash"
-        const val MAX_IMAGE_BYTES = 768 * 1024
-        const val MAX_IMAGE_DIMENSION = 1024
-        const val MIN_JPEG_QUALITY = 60
+        const val TAG = "CalorieLensRecognition"
+        const val MAX_IMAGE_BYTES = 640 * 1024
+        const val MAX_IMAGE_DIMENSION = 960
+        const val MIN_JPEG_QUALITY = 62
         const val PROMPT = """
 你是一个严谨的食物营养估算助手。识别图片中能看见的食物，按独立食物项返回。
 请估算每项可食部分重量（克）和整份对应的热量、蛋白质、脂肪、碳水、膳食纤维；零食、水果、饮料和餐后三餐之外的加餐也要单独识别，不要忽略。

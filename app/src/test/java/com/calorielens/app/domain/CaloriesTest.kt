@@ -1,6 +1,7 @@
 package com.calorielens.app.domain
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -21,5 +22,20 @@ class CaloriesTest {
         val meal = Meal("1", 0, "午餐", listOf(FoodItem("rice", "米饭", 150.0, 116.0, 2.6, .3, 25.9, .3)))
         val score = scoreMeal(meal, calculateDailyTarget(UserProfile()))
         assertTrue(score.reasons.any { it.contains("膳食纤维") })
+    }
+
+    @Test fun dailySummaryMarksOnlyKnownTargets() {
+        val summary = DailySummary(
+            localDate = java.time.LocalDate.of(2026, 10, 27),
+            calories = 1800,
+            protein = 70.0,
+            carbs = 220.0,
+            fat = 60.0,
+            fiber = 18.0,
+            targetCalories = 1700,
+            mealCount = 3
+        )
+        assertEquals(true, summary.overLimit)
+        assertNull(summary.copy(targetCalories = 0).overLimit)
     }
 }
