@@ -388,7 +388,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                 }.onSuccess {
                     backupMessage = "备份已导出；API Key 未包含在文件中。"
                 }.onFailure {
-                    backupMessage = "备份失败：${it.message ?: \"无法写入文件\"}"
+                    backupMessage = "备份失败：${it.message ?: "无法写入文件"}"
                 }
             }
         }
@@ -406,7 +406,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                 }.onSuccess {
                     backupMessage = "备份已导入。API Key 不在备份中；新安装后需重新填写。"
                 }.onFailure {
-                    backupMessage = "导入失败：${it.message ?: \"文件格式不正确\"}"
+                    backupMessage = "导入失败：${it.message ?: "文件格式不正确"}"
                 }
             }
         }
