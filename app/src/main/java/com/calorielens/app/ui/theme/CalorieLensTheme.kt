@@ -51,12 +51,7 @@ fun CalorieLensTheme(appearance: AppAppearance, content: @Composable () -> Unit)
                 AppWallpaper.BLUE -> Color(0xFFF3F7FB)
                 AppWallpaper.CREAM -> Color(0xFFFFFBF5)
             },
-            surface = when (appearance.wallpaper) {
-                AppWallpaper.GREEN -> Color(0xFFF7FCF7)
-                AppWallpaper.PINK -> Color(0xFFFFFAF7)
-                AppWallpaper.BLUE -> Color(0xFFF8FBFF)
-                AppWallpaper.CREAM -> Color(0xFFFFFBF5)
-            },
+            surface = Color.White,
             surfaceVariant = Color(0xFFF2F4EC)
         )
     }

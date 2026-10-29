@@ -53,26 +53,48 @@ fun MealNutritionSummary(nutrition: Nutrition, target: DailyTarget) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            NutritionRing(
-                value = nutrition.calories.toFloat(),
-                target = target.targetCalories.toFloat(),
-                label = "本餐热量",
-                center = "${nutrition.calories}",
-                unit = "kcal",
-                modifier = Modifier.size(128.dp),
-                strokeWidth = 11.dp
-            )
-            Spacer(Modifier.width(18.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                Text("占今日目标", fontWeight = FontWeight.Bold)
-                MacroBar("蛋白质", nutrition.protein, targets.protein, MaterialTheme.colorScheme.primary)
-                MacroBar("碳水", nutrition.carbs, targets.carbs, MaterialTheme.colorScheme.secondary)
-                MacroBar("脂肪", nutrition.fat, targets.fat, Color(0xFFE1B64B))
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("这餐营养", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("占今日目标", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                MiniNutrientRing("🔥 热量", nutrition.calories.toFloat(), target.targetCalories.toFloat(), "${nutrition.calories}", "kcal", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                MiniNutrientRing("🥩 蛋白", nutrition.protein.toFloat(), targets.protein.toFloat(), "${nutrition.protein.toInt()}g", "${(nutrition.protein / targets.protein * 100).toInt()}%", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                MiniNutrientRing("🍚 碳水", nutrition.carbs.toFloat(), targets.carbs.toFloat(), "${nutrition.carbs.toInt()}g", "${(nutrition.carbs / targets.carbs * 100).toInt()}%", MaterialTheme.colorScheme.secondary, Modifier.weight(1f))
+                MiniNutrientRing("🥑 脂肪", nutrition.fat.toFloat(), targets.fat.toFloat(), "${nutrition.fat.toInt()}g", "${(nutrition.fat / targets.fat * 100).toInt()}%", Color(0xFFE1B64B), Modifier.weight(1f))
             }
         }
+    }
+}
+
+@Composable
+private fun MiniNutrientRing(
+    emojiLabel: String,
+    value: Float,
+    target: Float,
+    center: String,
+    unit: String,
+    color: Color,
+    modifier: Modifier
+) {
+    val progress = (value / target.coerceAtLeast(1f)).coerceIn(0f, 1f)
+    val animated = remember { Animatable(0f) }
+    val track = MaterialTheme.colorScheme.surfaceVariant
+    LaunchedEffect(progress) { animated.animateTo(progress, tween(850, easing = FastOutSlowInEasing)) }
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(62.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawArc(track, -90f, 360f, false, style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round))
+                drawArc(color, -90f, 360f * animated.value, false, style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round))
+            }
+            Text(center, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1)
+        }
+        Text(emojiLabel, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        Text(unit, style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1)
     }
 }
 

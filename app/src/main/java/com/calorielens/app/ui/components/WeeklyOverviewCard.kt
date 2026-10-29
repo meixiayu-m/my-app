@@ -36,12 +36,13 @@ fun WeeklyOverviewCard(stats: WeeklyStats, summaries: List<DailySummary>, fallba
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("近 7 天", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("📊 近 7 天", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
                         if (stats.daysTracked == 0) "记录几餐后，这里会出现你的节奏" else "不是追完美，是看看自己的节奏",
                         style = MaterialTheme.typography.bodySmall,
