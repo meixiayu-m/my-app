@@ -2,13 +2,14 @@ package com.calorielens.app.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,21 +51,27 @@ fun ExitConfirmDialog(onStay: () -> Unit, onExit: () -> Unit) {
                     Modifier.fillMaxWidth().padding(top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    OutlinedButton(
+                    Button(
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onStay()
                         },
-                        modifier = Modifier.weight(0.46f),
-                        shape = RoundedCornerShape(17.dp)
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(17.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp)
                     ) { Text("再待会儿") }
                     Button(
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onExit()
                         },
-                        modifier = Modifier.weight(0.54f),
-                        shape = RoundedCornerShape(17.dp)
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(17.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp)
                     ) { Text("退出 App") }
                 }
             }
