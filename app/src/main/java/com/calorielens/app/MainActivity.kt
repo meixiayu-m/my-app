@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -153,6 +154,7 @@ import com.calorielens.app.ui.components.MealNutritionSummary
 import com.calorielens.app.ui.components.MacroBar
 import com.calorielens.app.ui.components.NutritionRing
 import com.calorielens.app.ui.components.RatingDialog
+import com.calorielens.app.ui.components.ExitConfirmDialog
 import com.calorielens.app.ui.components.WeeklyOverviewCard
 import com.calorielens.app.ui.components.macroTargets
 import com.calorielens.app.ui.theme.CalorieLensTheme
@@ -266,6 +268,7 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
     var showAppearance by remember { mutableStateOf(false) }
     var showManualMeal by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(false) }
+    var showExitConfirm by remember { mutableStateOf(false) }
     var ratingTarget by remember { mutableStateOf<Meal?>(null) }
     var editingMeal by remember { mutableStateOf<Meal?>(null) }
     var editingComment by remember { mutableStateOf("") }
@@ -386,6 +389,14 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
         editingMeal = null
         editingComment = ""
         cropCandidateUri = null
+    }
+    BackHandler(enabled = !showCamera && !showExitConfirm && cropCandidateUri == null && ratingTarget == null) {
+        when {
+            pendingItems != null || editingMeal != null || showProfile || showHistory ||
+                showApiKey || showAppearance || showManualMeal -> goHome()
+            fabExpanded -> fabExpanded = false
+            else -> showExitConfirm = true
+        }
     }
     Scaffold(
         containerColor = if (appearance.customWallpaperUri != null || appearance.glass) Color.Transparent else MaterialTheme.colorScheme.background,
@@ -638,6 +649,16 @@ private fun CalorieLensContent(appearance: AppAppearance, onAppearanceChanged: (
                     cropCandidateUri = null
                     recognizeImage(source)
                 }) { Text("直接识别") }
+            }
+        )
+    }
+    if (showExitConfirm) {
+        ExitConfirmDialog(
+            onStay = { showExitConfirm = false },
+            onExit = {
+                recognitionViewModel.clear()
+                showExitConfirm = false
+                (context as? Activity)?.finish()
             }
         )
     }
