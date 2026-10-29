@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -72,15 +71,28 @@ fun InAppCameraScreen(
     DisposableEffect(controller) { onDispose { controller.unbind() } }
     DisposableEffect(view) {
         val window = (view.context as? android.app.Activity)?.window
-        val originalColor = window?.statusBarColor
+        val originalStatusColor = window?.statusBarColor
+        val originalNavigationColor = window?.navigationBarColor
         val insets = window?.let { WindowInsetsControllerCompat(it, view) }
         val originalLightStatus = insets?.isAppearanceLightStatusBars
-        if (window != null) window.statusBarColor = Color.Black.toArgb()
-        if (insets != null) insets.isAppearanceLightStatusBars = false
+        val originalLightNavigation = insets?.isAppearanceLightNavigationBars
+        val cameraBackground = Color(0xFFFFFCF7)
+        if (window != null) {
+            window.statusBarColor = cameraBackground.toArgb()
+            window.navigationBarColor = cameraBackground.toArgb()
+        }
+        if (insets != null) {
+            insets.isAppearanceLightStatusBars = true
+            insets.isAppearanceLightNavigationBars = true
+        }
         onDispose {
-            if (window != null && originalColor != null) window.statusBarColor = originalColor
+            if (window != null && originalStatusColor != null) window.statusBarColor = originalStatusColor
+            if (window != null && originalNavigationColor != null) window.navigationBarColor = originalNavigationColor
             if (insets != null && originalLightStatus != null) {
                 insets.isAppearanceLightStatusBars = originalLightStatus
+            }
+            if (insets != null && originalLightNavigation != null) {
+                insets.isAppearanceLightNavigationBars = originalLightNavigation
             }
         }
     }
@@ -114,7 +126,7 @@ fun InAppCameraScreen(
     }
 
     Column(
-        Modifier.fillMaxSize().background(Color(0xFF111713)).systemBarsPadding().padding(horizontal = 18.dp),
+        Modifier.fillMaxSize().background(Color(0xFFFFFCF7)).systemBarsPadding().padding(horizontal = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(Modifier.height(16.dp))
@@ -126,13 +138,13 @@ fun InAppCameraScreen(
             IconButton(
                 onClick = onClose,
                 enabled = !capturing,
-                modifier = Modifier.background(Color.White.copy(alpha = 0.14f), CircleShape)
+                modifier = Modifier.background(Color(0xFFF0F4F0), CircleShape)
             ) {
-                Icon(Icons.Default.Close, contentDescription = "关闭相机", tint = Color.White)
+                Icon(Icons.Default.Close, contentDescription = "关闭相机", tint = Color(0xFF29362E))
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("🍽️ 拍下这一餐", color = Color.White, style = androidx.compose.material3.MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text("尽量让食物填满中间的相框", color = Color.White.copy(alpha = 0.68f), style = androidx.compose.material3.MaterialTheme.typography.labelMedium)
+                Text("🍽️ 拍下这一餐", color = Color(0xFF29362E), style = androidx.compose.material3.MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("把食物放进中间的取景画面", color = Color(0xFF6E7C73), style = androidx.compose.material3.MaterialTheme.typography.labelMedium)
             }
             Spacer(Modifier.size(48.dp))
         }
@@ -142,7 +154,7 @@ fun InAppCameraScreen(
             Modifier.weight(1f).fillMaxWidth()
                 .clip(RoundedCornerShape(34.dp))
                 .background(Color.White)
-                .border(3.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(34.dp))
+                .border(1.dp, Color(0xFFDCE6DE), RoundedCornerShape(34.dp))
                 .padding(8.dp)
         ) {
             AndroidView(
@@ -155,28 +167,17 @@ fun InAppCameraScreen(
                 },
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(27.dp))
             )
-            Surface(
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
-                shape = CircleShape,
-                color = Color.Black.copy(alpha = 0.42f)
-            ) {
-                Text(
-                    "白色相框就是取景范围",
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall
-                )
-            }
         }
         Spacer(Modifier.height(22.dp))
-        Text("拍歪了也没关系，下一步还可以裁剪", color = Color.White.copy(alpha = 0.58f), style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
+        Text("拍歪了也没关系，下一步还可以裁剪", color = Color(0xFF78857C), style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(12.dp))
         Box(
-            Modifier.size(82.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.2f)),
+            Modifier.size(82.dp).clip(CircleShape).background(Color(0xFFDCEBE1)),
             contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier.size(66.dp).clip(CircleShape).background(Color.White)
+                    .border(2.dp, Color(0xFF6E947A), CircleShape)
                     .clickable(enabled = !capturing) {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     capture()
